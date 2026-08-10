@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * import.js — Persyst Memory JSONL Import CLI
+ * import.js — ScopeKeep Memory JSONL Import CLI
  *
  * Imports memories from a JSONL file created by `persyst-export`.
  * Regenerates vector embeddings for each imported memory.
@@ -49,7 +49,7 @@ if (!inputFile) {
 // ============================================================
 
 async function main() {
-  console.log(`[IMPORT] Persyst Import${isDryRun ? ' (DRY RUN — nothing will be written)' : ''}`);
+  console.log(`[IMPORT] ScopeKeep Import${isDryRun ? ' (DRY RUN — nothing will be written)' : ''}`);
   console.log(`         Source: ${inputFile}`);
   if (forceNamespace) console.log(`         Forcing namespace: "${forceNamespace}"`);
   if (skipEmbeddings) console.log('         Skipping embedding regeneration.');

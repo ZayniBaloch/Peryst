@@ -1,14 +1,14 @@
-# Aider Integration Guide for Persyst
+# Aider Integration Guide for ScopeKeep
 
-Persyst gives Aider long-term persistent memory across sessions. By running Persyst as an MCP server, Aider can store, retrieve, and search memories about your project's architecture, past decisions, and coding conventions.
+ScopeKeep gives Aider long-term persistent memory across sessions. By running ScopeKeep as an MCP server, Aider can store, retrieve, and search memories about your project's architecture, past decisions, and coding conventions.
 
 ## 1. Setup
 
-Start the Persyst MCP server in the background before running Aider, or run them in separate terminals.
+Start the ScopeKeep MCP server in the background before running Aider, or run them in separate terminals.
 
 ```bash
 # Terminal 1: Start the memory server
-npx persyst-mcp
+npx scopekeep
 
 # Terminal 2: Run Aider
 aider
@@ -18,12 +18,12 @@ aider
 
 ## 2. Ingesting Git History (The Magic Feature)
 
-One of the most powerful ways to use Persyst with Aider is to ingest your project's git history. This turns every past commit into a searchable memory. Aider can then understand *why* certain code was written or what bugs were fixed in the past.
+One of the most powerful ways to use ScopeKeep with Aider is to ingest your project's git history. This turns every past commit into a searchable memory. Aider can then understand *why* certain code was written or what bugs were fixed in the past.
 
 In your Aider chat, just say:
 > "Use the ingest_git_commits tool to import the last 100 commits from this repository."
 
-Aider will call `ingest_git_commits(repo_path=".", count=100)`. Persyst will:
+Aider will call `ingest_git_commits(repo_path=".", count=100)`. ScopeKeep will:
 1. Parse the git log.
 2. Store each commit as a memory.
 3. Automatically generate a semantic search embedding.

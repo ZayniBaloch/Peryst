@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * persyst-setup — One-command installer for Persyst Claude Code hooks
+ * persyst-setup — One-command installer for ScopeKeep Claude Code hooks
  * 
  * Usage:
- *   npx persyst-mcp setup
+ *   npx scopekeep setup
  * 
  * What it does:
  *   1. Copies persyst-hook.js to ~/.persyst/hooks/
@@ -90,8 +90,8 @@ function readJsonFile(filePath) {
 }
 
 /**
- * Merge Persyst hook entries into existing settings.
- * Does NOT overwrite existing hooks — appends Persyst entries if not already present.
+ * Merge ScopeKeep hook entries into existing settings.
+ * Does NOT overwrite existing hooks — appends ScopeKeep entries if not already present.
  */
 function mergeHookSettings(existing) {
   const settings = { ...existing };
@@ -104,7 +104,7 @@ function mergeHookSettings(existing) {
       settings.hooks[eventName] = [];
     }
 
-    // Check if a Persyst hook is already registered
+    // Check if a ScopeKeep hook is already registered
     const alreadyRegistered = settings.hooks[eventName].some(group =>
       group.hooks && group.hooks.some(h =>
         h.command && h.command.includes('persyst-hook')
@@ -125,14 +125,14 @@ function mergeHookSettings(existing) {
 
 function run() {
   console.log('');
-  console.log('  Persyst — Claude Code Hook Setup');
+  console.log('  ScopeKeep — Claude Code Hook Setup');
   console.log('  ════════════════════════════════════');
   console.log('');
 
   // Step 1: Verify hook source exists
   if (!existsSync(HOOK_SOURCE)) {
     console.error(`  [ERROR] Hook source not found at: ${HOOK_SOURCE}`);
-    console.error('          Make sure you are running this from the persyst-mcp package.');
+    console.error('          Make sure you are running this from the scopekeep package.');
     process.exit(1);
   }
 
@@ -163,7 +163,7 @@ function run() {
   console.log('  ════════════════════════════════════');
   console.log('  [OK] Setup complete!');
   console.log('');
-  console.log('  Persyst will now automatically:');
+  console.log('  ScopeKeep will now automatically:');
   console.log('    • Load your stored memories when Claude Code starts');
   console.log('    • Search for relevant context on every prompt');
   console.log('    • Index your git commits into the memory database');

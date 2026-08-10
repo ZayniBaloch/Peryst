@@ -1,7 +1,7 @@
 {
-  "name": "persyst-mcp",
-  "version": "2.2.8",
-  "description": "Local-first, compliance-grade MCP memory layer with hybrid keyword + semantic search for coding agents",
+  "name": "scopekeep",
+  "version": "3.0.0-alpha.2",
+  "description": "Governed, project-scoped memory and context for AI coding teams",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -12,14 +12,15 @@
     }
   },
   "bin": {
-    "persyst-mcp": "index.js",
-    "persyst-setup": "bin/setup.js",
-    "persyst-init": "bin/init.js",
-    "persyst-monitor": "bin/monitor.js",
-    "persyst": "index.js"
+    "scopekeepd": "bin/daemon.js",
+    "scopekeep": "index.js",
+    "scopekeep-setup": "bin/setup.js",
+    "scopekeep-init": "bin/init.js",
+    "scopekeep-export": "bin/export.js",
+    "scopekeep-import": "bin/import.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "files": [
     "index.js",
@@ -31,13 +32,17 @@
   ],
   "scripts": {
     "start": "node index.js",
-    "test": "cross-env NODE_ENV=test node test/smoke.js",
-    "test:stress": "node test/production_stress_suite.js",
-    "test:heavy": "node test/run_sequentially.js",
+    "test": "cross-env NODE_ENV=test node test/run_sequentially.js",
+    "test:smoke": "cross-env NODE_ENV=test node test/smoke.js",
+    "test:stress": "cross-env NODE_ENV=test node test/production_stress_suite.js",
+    "test:heavy": "npm test",
     "monitor": "node bin/monitor.js",
     "monitor:context": "node bin/monitor.js --context",
     "worker": "node bin/extract-worker.js",
-    "extract": "node bin/extract.js"
+    "extract": "node bin/extract.js",
+    "export": "node bin/export.js",
+    "import": "node bin/import.js",
+    "privacy:export": "node index.js privacy-export"
   },
   "keywords": [
     "mcp",
@@ -67,10 +72,20 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3-multiple-ciphers": "^12.11.1",
     "chokidar": "^5.0.0",
     "sqlite-vec": "^0.1.9",
     "zod": "^3.23.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11",
+    "adm-zip": "0.6.0",
+    "body-parser": "2.3.0",
+    "fast-uri": "3.1.5",
+    "hono": "4.12.34",
+    "ip-address": "10.4.0",
+    "protobufjs": "7.6.5",
+    "sharp": "0.35.3"
   },
   "devDependencies": {
     "cross-env": "^10.1.0"

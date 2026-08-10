@@ -11,7 +11,7 @@ import { spawn } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
-import { Persyst } from '../src/sdk.js';
+import { ScopeKeep } from '../src/sdk.js';
 import db, { closeDatabase } from '../src/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,7 +58,7 @@ function p90(values) {
 
 async function run() {
   console.log('\n============================================================');
-  console.log('🧪 PERSYST PROFESSIONAL SDK BENCHMARK & ROBUSTNESS TEST');
+  console.log('🧪 SCOPEKEEP PROFESSIONAL SDK BENCHMARK & ROBUSTNESS TEST');
   console.log('============================================================\n');
 
   // Reset local test database
@@ -77,7 +77,7 @@ async function run() {
 
   let offlinePassed = false;
   try {
-    const sdk = new Persyst({ mode: 'library' });
+    const sdk = new ScopeKeep({ mode: 'library' });
     const res = await sdk.track({
       sessionId: 'offline_check',
       workflow: 'test_workflow',
@@ -140,7 +140,7 @@ async function run() {
     }
   ];
 
-  const sdk = new Persyst({ mode: 'library' });
+  const sdk = new ScopeKeep({ mode: 'library' });
   let classifierPassed = true;
 
   for (const [idx, tc] of testCases.entries()) {
@@ -192,8 +192,8 @@ async function run() {
     throw err;
   }
 
-  const libSdk = new Persyst({ mode: 'library' });
-  const gwSdk = new Persyst({ mode: 'gateway', port: TEST_PORT });
+  const libSdk = new ScopeKeep({ mode: 'library' });
+  const gwSdk = new ScopeKeep({ mode: 'gateway', port: TEST_PORT });
 
   const libLatencies = [];
   const gwLatencies = [];

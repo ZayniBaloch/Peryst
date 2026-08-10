@@ -1,6 +1,6 @@
-# 🔌 Persyst Swarm Connection Specification
+# 🔌 ScopeKeep Swarm Connection Specification
 
-This specification documents all HTTP endpoints, authentication, event streaming, and namespace patterns for running reliable local-first or remote **Agent Swarms** integrated with the Persyst Memory Gateway.
+This specification documents all HTTP endpoints, authentication, event streaming, and namespace patterns for running reliable local-first or remote **Agent Swarms** integrated with the ScopeKeep Memory Gateway.
 
 ---
 
@@ -15,7 +15,7 @@ graph TD
       ExtPy[External Python Script]
     end
 
-    subgraph Persyst HTTP Gateway
+    subgraph ScopeKeep HTTP Gateway
       Health[GET /health]
       Stats[GET /stats]
       Prompt[GET /system-prompt]
@@ -47,7 +47,7 @@ graph TD
 
 ### Docker example
 ```bash
-PERSYST_HOST=0.0.0.0 PERSYST_API_KEY=mysecretkey npx persyst-mcp
+PERSYST_HOST=0.0.0.0 PERSYST_API_KEY=mysecretkey npx scopekeep
 ```
 
 ### Accessing from another host
@@ -379,9 +379,9 @@ import requests
 import json
 from typing import List, Dict, Any, Optional
 
-class PersystSwarmClient:
+class ScopeKeepSwarmClient:
     """
-    Production-ready Persyst client for agentic swarms.
+    Production-ready ScopeKeep client for agentic swarms.
     Supports health checking, auth, batch ops, and SSE events.
     """
     
@@ -393,7 +393,7 @@ class PersystSwarmClient:
         self.session.headers["Content-Type"] = "application/json"
 
     def is_alive(self) -> bool:
-        """Check if the Persyst server is running."""
+        """Check if the ScopeKeep server is running."""
         try:
             r = requests.get(f"{self.base_url}/health", timeout=1.0)
             return r.status_code == 200 and r.json().get("ok", False)
@@ -466,10 +466,10 @@ class PersystSwarmClient:
 # ── Swarm Usage Example ──────────────────────────────────────────
 
 if __name__ == "__main__":
-    client = PersystSwarmClient(api_key="mysecretkey")  # Remove api_key if not using auth
+    client = ScopeKeepSwarmClient(api_key="mysecretkey")  # Remove api_key if not using auth
     
     if not client.is_alive():
-        print("❌ Persyst server not running. Start with: npx persyst-mcp")
+        print("❌ ScopeKeep server not running. Start with: npx scopekeep")
         exit(1)
     
     # Load all agent contexts at startup in one request

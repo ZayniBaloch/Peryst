@@ -20,3 +20,14 @@ test_watcher_temp/
 .persystrules.md
 PERYST_TECHNICAL_MANUAL.pdf
 
+# Local audit outputs, exports, downloaded benchmarks, and generated bundles
+.audit-temp/
+data/
+.vscode/
+app/
+.agents.zip
+scopekeep_codebase.zip
+my_backup.jsonl
+persyst-export-*.jsonl
+skills-lock.json
+vscode-extension/*.vsix

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * stress_test.js — Persyst Ultimate Stress Test
+ * stress_test.js — ScopeKeep Ultimate Stress Test
  *
  * Tests: massive load, concurrency, edge cases, security boundaries,
  * namespace isolation, contradiction chains, attestation integrity,
  * performance under pressure, and evil inputs.
  *
  * Run: node test/stress_test.js
- * Requires: Persyst server running on PORT env or 4321
+ * Requires: ScopeKeep server running on PORT env or 4321
  */
 
 import http from 'http';

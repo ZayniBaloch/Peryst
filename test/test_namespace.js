@@ -20,6 +20,15 @@ function assert(condition, msg) {
   else { console.log(`  ❌ ${msg}`); failed++; }
 }
 
+function assertThrows(fn, pattern, msg) {
+  try {
+    fn();
+    assert(false, msg);
+  } catch (error) {
+    assert(pattern.test(error.message), msg);
+  }
+}
+
 async function run() {
   console.log('\n🧪 Namespace Isolation Test\n');
 
@@ -74,13 +83,13 @@ async function run() {
   assert(!recentDefaultIds.includes(agentAId), 'Default namespace does NOT see agent-a');
   assert(!recentDefaultIds.includes(agentBId), 'Default namespace does NOT see agent-b');
 
-  // 6b. Test: namespace 'all' = retrieves all (admin/system override)
-  console.log('\n🔍 Step 6b: Namespace "all" visibility (should see everything)');
-  const recentAll = getRecentMemories(50, 'all');
-  const recentAllIds = recentAll.map(m => m.id);
-  assert(recentAllIds.includes(sharedId), 'Namespace "all" sees shared');
-  assert(recentAllIds.includes(agentAId), 'Namespace "all" sees agent-a');
-  assert(recentAllIds.includes(agentBId), 'Namespace "all" sees agent-b');
+  // 6b. Caller-controlled cross-namespace access must be rejected.
+  console.log('\n🔍 Step 6b: Namespace "all" is rejected');
+  assertThrows(
+    () => getRecentMemories(50, 'all'),
+    /"all" namespace is disabled/,
+    'Caller-controlled cross-namespace access must be rejected'
+  );
 
   // 7. Test: getMemoryById with namespace filter
   console.log('\n🔍 Step 7: getMemoryById namespace filtering');

@@ -1,0 +1,82 @@
+{
+  "name": "scopekeep-vscode",
+  "displayName": "ScopeKeep",
+  "description": "Review and govern project-scoped AI memory from VS Code.",
+  "version": "0.1.0",
+  "publisher": "scopekeep",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other", "Machine Learning"],
+  "keywords": ["MCP", "memory", "AI", "local-first", "privacy"],
+  "activationEvents": [
+    "onView:scopekeep.memories",
+    "onCommand:scopekeep.openReview",
+    "onCommand:scopekeep.refresh"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "scopekeep.openReview", "title": "ScopeKeep: Open Memory Review" },
+      { "command": "scopekeep.refresh", "title": "ScopeKeep: Refresh Memories", "icon": "$(refresh)" },
+      { "command": "scopekeep.start", "title": "ScopeKeep: Start Local Service" },
+      { "command": "scopekeep.stop", "title": "ScopeKeep: Stop Local Service" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "scopekeep",
+          "title": "ScopeKeep",
+          "icon": "media/scopekeep.svg"
+        }
+      ]
+    },
+    "views": {
+      "scopekeep": [
+        {
+          "id": "scopekeep.memories",
+          "name": "Workspace Memories",
+          "when": "workspaceFolderCount != 0"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "scopekeep.openReview", "when": "view == scopekeep.memories", "group": "navigation@1" },
+        { "command": "scopekeep.refresh", "when": "view == scopekeep.memories", "group": "navigation@2" }
+      ]
+    },
+    "configuration": {
+      "title": "ScopeKeep",
+      "properties": {
+        "scopekeep.package": {
+          "type": "string",
+          "default": "scopekeep@next",
+          "description": "npm package spec used to start the local ScopeKeep service."
+        },
+        "scopekeep.port": {
+          "type": "number",
+          "default": 43219,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Loopback port reserved for the ScopeKeep review service."
+        },
+        "scopekeep.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the local review service when the ScopeKeep view opens."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check extension.js",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "files": ["extension.js", "media", "README.md", "LICENSE"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZayniBaloch/persyst"
+  }
+}

@@ -4,7 +4,7 @@
  * persyst-ingest — Direct Git Commit Ingester
  * 
  * Usage:
- *   npx persyst-mcp ingest [repo_path] [count]
+ *   npx scopekeep ingest [repo_path] [count]
  * 
  * This script runs directly without starting the MCP server, allowing
  * git hooks or direct CLI commands to populate the memory database.
@@ -25,7 +25,7 @@ const repoPath = process.argv[2] || process.cwd();
 const count = parseInt(process.argv[3], 10) || 10;
 
 async function run() {
-  console.log(`[persyst] Ingesting git commits for: ${repoPath}`);
+  console.log(`[scopekeep] Ingesting git commits for: ${repoPath}`);
   try {
     const commits = await getRecentCommits(repoPath, count);
     let added = 0;
@@ -71,10 +71,10 @@ async function run() {
       searchCache.invalidate();
     }
 
-    console.log(`[persyst] Success: Ingested ${added} commits (${skipped} already existed)`);
+    console.log(`[scopekeep] Success: Ingested ${added} commits (${skipped} already existed)`);
     process.exit(0);
   } catch (err) {
-    console.error(`[persyst] Ingestion failed: ${err.message}`);
+    console.error(`[scopekeep] Ingestion failed: ${err.message}`);
     process.exit(1);
   }
 }

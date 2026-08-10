@@ -99,7 +99,7 @@ export class LRUCache {
     const size = this.cache.size;
     this.cache.clear();
     if (size > 0) {
-      logInfo(`[persyst-cache] Invalidated ${size} cached entries`);
+      logInfo(`[scopekeep-cache] Invalidated ${size} cached entries`);
     }
   }
 

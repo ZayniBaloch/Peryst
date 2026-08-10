@@ -6,6 +6,7 @@ import db, { closeDatabase, getMemoryById, getEntityByName } from '../src/databa
 
 let server;
 const handlers = {};
+const annotations = {};
 
 test.before(() => {
   db.exec('DELETE FROM edges; DELETE FROM entities; DELETE FROM memories_vec; DELETE FROM memories; DELETE FROM memories_fts;');
@@ -13,9 +14,11 @@ test.before(() => {
   
   // Intercept tool registration to capture callbacks for unit testing
   const originalTool = server.tool;
-  server.tool = (name, desc, schema, callback) => {
-    handlers[name] = callback;
-    return originalTool.call(server, name, desc, schema, callback);
+  server.tool = (...args) => {
+    const name = args[0];
+    handlers[name] = args[args.length - 1];
+    annotations[name] = args[args.length - 2];
+    return originalTool.call(server, ...args);
   };
   
   registerTools(server);
@@ -26,6 +29,24 @@ test.after(() => {
 });
 
 test('MCP Tools Handlers', async (t) => {
+  await t.test('tools expose MCP safety annotations', () => {
+    assert.equal(annotations.search_memories.readOnlyHint, true);
+    assert.equal(annotations.get_memories_as_of.readOnlyHint, true);
+    assert.equal(annotations.search_memories.openWorldHint, false);
+    assert.equal(annotations.add_memory.readOnlyHint, false);
+    assert.equal(annotations.delete_memory.destructiveHint, true);
+    assert.equal(annotations.delete_memory.idempotentHint, true);
+  });
+
+  await t.test('get_memories_as_of returns an auditable historical snapshot', async () => {
+    const handler = handlers['get_memories_as_of'];
+    assert.ok(handler, 'get_memories_as_of handler should be registered');
+    const response = await handler({ as_of: Date.now(), limit: 10 });
+    const result = JSON.parse(response.content[0].text);
+    assert.ok(Array.isArray(result.memories));
+    assert.equal(result.as_of_unix_ms > 0, true);
+  });
+
   await t.test('add_memory tool stores memory and vector', async () => {
     const handler = handlers['add_memory'];
     assert.ok(handler, 'add_memory handler should be registered');

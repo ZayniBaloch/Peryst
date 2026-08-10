@@ -3,18 +3,18 @@
 /**
  * persyst-monitor — Real-Time Terminal Activity Monitor
  *
- * Connects to the Persyst HTTP gateway (default: http://127.0.0.1:4321) and
+ * Connects to the ScopeKeep HTTP gateway (default: http://127.0.0.1:4321) and
  * streams all memory events live to your terminal. Also polls /health and
  * /stats every 10 seconds to show a running context snapshot.
  *
  * Usage:
- *   npx persyst-mcp monitor
+ *   npx scopekeep monitor
  *   node bin/monitor.js
  *   node bin/monitor.js --port 4321
  *   node bin/monitor.js --context          (snapshot only, no event stream)
  *
  * Requirements:
- *   - Persyst server must be running (npx persyst-mcp OR node index.js)
+ *   - ScopeKeep server must be running (npx scopekeep OR node index.js)
  *   - Server gateway port 4321 must be accessible (http://127.0.0.1:4321)
  */
 
@@ -397,8 +397,8 @@ async function runContextSnapshot() {
     const [health, stats] = await Promise.all([get('/health'), get('/stats')]);
     printStatsPanel(health, stats);
   } catch (err) {
-    console.log(`  ${red('[ERROR]')} Cannot reach Persyst server at ${BASE_URL}`);
-    console.log(`  ${dim('Make sure persyst-mcp is running: npx persyst-mcp')}`);
+    console.log(`  ${red('[ERROR]')} Cannot reach ScopeKeep server at ${BASE_URL}`);
+    console.log(`  ${dim('Make sure scopekeep is running: npx scopekeep')}`);
     console.log(`  ${dim('Error: ' + err.message)}`);
     process.exit(1);
   }
@@ -497,7 +497,7 @@ process.on('SIGINT', () => {
 
 async function main() {
   console.log('');
-  console.log(`  ${bold('Persyst Monitor')} — connecting to ${cyan(BASE_URL)}...`);
+  console.log(`  ${bold('ScopeKeep Monitor')} — connecting to ${cyan(BASE_URL)}...`);
 
   if (CONTEXT_ONLY) {
     await runContextSnapshot();
@@ -509,10 +509,10 @@ async function main() {
     await get('/health');
   } catch (err) {
     console.log('');
-    console.log(`  ${red('[ERROR]')} Cannot reach Persyst server at ${cyan(BASE_URL)}`);
+    console.log(`  ${red('[ERROR]')} Cannot reach ScopeKeep server at ${cyan(BASE_URL)}`);
     console.log('');
     console.log(`  ${bold('Start the server first:')}`);
-    console.log(`    npx persyst-mcp`);
+    console.log(`    npx scopekeep`);
     console.log(`    node index.js`);
     console.log('');
     console.log(`  ${dim('Error: ' + err.message)}`);

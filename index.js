@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * Persyst MCP Server — Entry Point
+ * ScopeKeep MCP Server - Entry Point
  * 
  * A local-first memory server for coding agents.
  * Starts the MCP server on stdio transport.
  * 
  * Usage:
- *   node index.js          (direct — starts MCP server)
- *   npx persyst-mcp        (via npm — starts MCP server)
- *   npx persyst-mcp setup  (install Claude Code hooks)
- *   npx persyst-mcp init   (initialize workspace rules & git hooks)
- *   npx persyst-mcp ingest (manually ingest git commits)
- *   persyst-mcp            (if installed globally)
+ *   node index.js          (direct - starts MCP server)
+ *   npx scopekeep          (via npm - starts MCP server)
+ *   npx scopekeep setup    (install Claude Code hooks)
+ *   npx scopekeep init     (initialize workspace rules and git hooks)
+ *   npx scopekeep ingest   (manually ingest git commits)
+ *   scopekeep              (if installed globally)
  */
 
 // If running inside Bun (like Qwen's internal runtime), spawn Node.js instead
@@ -81,7 +81,9 @@ if (process.platform === 'win32') {
 // Handle subcommands before starting the server
 const subcommand = process.argv[2];
 
-if (subcommand === 'setup') {
+if (subcommand === 'daemon') {
+  await import('./bin/daemon.js');
+} else if (subcommand === 'setup') {
   // Delegate to the setup CLI
   await import('./bin/setup.js');
 } else if (subcommand === 'aider') {
@@ -90,7 +92,8 @@ if (subcommand === 'setup') {
   await import('./bin/aider.js');
 } else if (subcommand === 'init') {
   // Delegate to the rules init CLI
-  await import('./bin/init.js');
+  const { run } = await import('./bin/init.js');
+  await run();
 } else if (subcommand === 'ingest') {
   // Shift 'ingest' from process.argv so ingest.js gets the correct arguments
   process.argv.splice(2, 1);
@@ -110,11 +113,21 @@ if (subcommand === 'setup') {
   // Import memories from a JSONL file
   process.argv.splice(2, 1);
   await import('./bin/import.js');
+} else if (subcommand === 'privacy-export' || subcommand === 'purge-workspace') {
+  const { runPrivacyCommand } = await import('./bin/privacy.js');
+  await runPrivacyCommand(subcommand);
+} else if (subcommand === 'doctor' || subcommand === 'status') {
+  const { runDoctor, runStatus } = await import('./bin/diagnostics.js');
+  if (subcommand === 'doctor') runDoctor();
+  else runStatus();
+} else if (subcommand === 'uninstall') {
+  const { runUninstall } = await import('./bin/uninstall.js');
+  runUninstall();
 } else {
   // Default: start the MCP server
   const { startServer } = await import('./src/server.js');
   await startServer().catch(err => {
-    console.error('❌ Persyst failed to start:', err.message);
+    console.error('[ERROR] ScopeKeep failed to start:', err.message);
     process.exit(1);
   });
 }

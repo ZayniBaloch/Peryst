@@ -1,7 +1,7 @@
 /**
  * tools.js — MCP Tool Definitions & Handlers
  * 
- * Defines all 19 tools that AI agents can call via MCP.
+ * Defines the MCP tools that AI agents can call.
  * 
  * v2.0 changes:
  * - Bug 1: Uses memoryExistsByHashPrefix for git dedup
@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod';
+import { relative, resolve } from 'path';
 import { generateEmbedding } from './embeddings.js';
 import db, {
   stmts,
@@ -23,6 +24,7 @@ import db, {
   deleteMemory,
   deleteVec,
   getRecentMemories,
+  getMemoriesAsOf,
   getImportantMemories,
   insertEntity,
   getEntityByName,
@@ -44,13 +46,16 @@ import db, {
   searchVector,
   getMemoryById,
   getActiveMemoryCount,
-  getNamespaceStats
+  getNamespaceStats,
+  WORKSPACE_ID,
+  WORKSPACE_ROOT
 } from './database.js';
 import { searchHybrid, getOptimizedContext, consolidateMemories } from './search.js';
 import { jaccardDistance } from './text-utils.js';
 import { getRecentCommits } from './git.js';
 import { verifyChainIntegrity } from './attestation.js';
 import { searchCache } from './cache.js';
+import { scanAndSanitize } from './secret-scanner.js';
 import { memoryEventBus } from './events.js';
 
 // ============================================================
@@ -62,6 +67,34 @@ const MAX_MEMORY_CONTENT_LENGTH = 10000;
 
 /** Minimum content length (must have actual content) */
 const MIN_MEMORY_CONTENT_LENGTH = 1;
+
+function getAccessNamespace(agentId = null) {
+  const normalizedAgent = agentId ? String(agentId).trim().toLowerCase() : null;
+  const project = process.env.PERSYST_PROJECT ? process.env.PERSYST_PROJECT.trim().toLowerCase() : null;
+  return [normalizedAgent, project].filter(Boolean).join(',') || null;
+}
+
+function assertWorkspacePath(candidatePath) {
+  const resolvedPath = resolve(candidatePath);
+  const rel = relative(WORKSPACE_ROOT, resolvedPath);
+  if (rel.startsWith('..') || resolve(WORKSPACE_ROOT, rel) !== resolvedPath) {
+    throw new Error('Repository path must be inside the active workspace.');
+  }
+  return resolvedPath;
+}
+
+function parseAsOfTimestamp(value) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0) throw new Error('as_of must be a valid timestamp.');
+    // Accept Unix seconds for CLI convenience, while storing/querying in ms.
+    return Math.trunc(value < 100000000000 ? value * 1000 : value);
+  }
+  const parsed = Date.parse(String(value));
+  if (!Number.isFinite(parsed)) {
+    throw new Error('as_of must be an ISO-8601 date or Unix timestamp.');
+  }
+  return parsed;
+}
 
 // ============================================================
 // WATCHER REGISTRY
@@ -77,7 +110,7 @@ const watchers = new Map();
 export function cleanupWatchers() {
   for (const [repoPath, intervalId] of watchers.entries()) {
     clearInterval(intervalId);
-    console.error(`[persyst-watcher] Stopped watching: ${repoPath}`);
+    console.error(`[scopekeep-watcher] Stopped watching: ${repoPath}`);
   }
   watchers.clear();
 }
@@ -112,8 +145,9 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
   try {
     const normalizedAgentId = agent_id ? agent_id.toLowerCase() : null;
 
-    // Redact secrets/credentials on write
-    const redactedContent = redactSecrets(content);
+    // Redact secrets/credentials and PII on write
+    const sanitized = scanAndSanitize(content);
+    const redactedContent = redactSecrets(sanitized.sanitizedText);
 
     // Bug 7 + Feature 4: Validate content size
     const validation = validateMemoryContent(redactedContent);
@@ -122,9 +156,7 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
     }
 
     // Derive namespace from agent_id, project env, and shared flag
-    const project = process.env.PERSYST_PROJECT;
-    const defaultNs = project || 'shared';
-    const namespace = (shared && !project) ? 'shared' : (normalizedAgentId || defaultNs);
+    const namespace = shared ? 'shared' : (normalizedAgentId || 'private');
 
     // Deduplication check (namespace-aware)
     const existing = getMemoryByContent(redactedContent, namespace);
@@ -136,7 +168,7 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
           stmts.updateProvenanceOwner.run(normalizedAgentId, existing.id);
           incrementAgentStat(normalizedAgentId, 'created');
         } catch (e) {
-          console.error(`[persyst] Re-attribute provenance error: ${e.message}`);
+          console.error(`[scopekeep] Re-attribute provenance error: ${e.message}`);
         }
       }
       boostMemory(existing.id);
@@ -166,7 +198,7 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
     // Feature 2: Contradiction Detection
     let contradictions = [];
     try {
-      const similarHits = searchVector(embedding, 20);
+      const similarHits = searchVector(embedding, 20, getAccessNamespace(normalizedAgentId));
       for (const hit of similarHits) {
         const hitId = Number(hit.rowid);
         if (hitId === id) continue; // Skip self
@@ -183,13 +215,13 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
             const oldProv = getProvenance(hitId);
             let oldReputation = 1.0;
             if (oldProv && oldProv.source_type === 'agent' && oldProv.source_id) {
-              const agentRow = stmts.getReputationScore.get(oldProv.source_id);
+              const agentRow = stmts.getReputationScore.get(oldProv.source_id, WORKSPACE_ID);
               if (agentRow) oldReputation = agentRow.reputation_score;
             }
 
             let newReputation = 1.0;
             if (normalizedAgentId) {
-              const agentRow = stmts.getReputationScore.get(normalizedAgentId);
+              const agentRow = stmts.getReputationScore.get(normalizedAgentId, WORKSPACE_ID);
               if (agentRow) newReputation = agentRow.reputation_score;
             }
 
@@ -202,33 +234,19 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
               continue; // Same agent: treat as complementary, not contradictory
             }
 
-            if (trustNew > trustOld) {
-              // New is preferred
-              logContradiction(hitId, id, `Auto-detected contradiction: new memory is more trustworthy (similarity: ${sim.toFixed(3)}, content_diff: ${jaccard.toFixed(3)})`);
-              contradictions.push({
-                old_memory_id: hitId,
-                old_content_preview: existingMemory.content.slice(0, 100),
-                similarity: sim.toFixed(4),
-                content_difference: jaccard.toFixed(4),
-                resolution: 'replaced_old'
-              });
-            } else {
-              // Old is preferred
-              logContradiction(id, hitId, `Auto-detected contradiction: existing memory is more trustworthy (similarity: ${sim.toFixed(3)}, content_diff: ${jaccard.toFixed(3)})`);
-              contradictions.push({
-                old_memory_id: hitId,
-                old_content_preview: existingMemory.content.slice(0, 100),
-                similarity: sim.toFixed(4),
-                content_difference: jaccard.toFixed(4),
-                resolution: 'kept_old'
-              });
-              break; // New memory was archived, stop contradiction check
-            }
+            contradictions.push({
+              existing_memory_id: hitId,
+              existing_content_preview: existingMemory.content.slice(0, 100),
+              similarity: sim.toFixed(4),
+              content_difference: jaccard.toFixed(4),
+              suggested_resolution: trustNew > trustOld ? 'prefer_new' : 'prefer_existing',
+              status: 'review_required'
+            });
           }
         }
       }
     } catch (e) {
-      console.error(`[persyst] Contradiction detection error: ${e.message}`);
+      console.error(`[scopekeep] Contradiction detection error: ${e.message}`);
     }
 
     const result = { success: true, id, namespace, message: `Memory #${id} stored` };
@@ -237,6 +255,9 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
       result.message += `. Detected ${contradictions.length} contradiction(s) — older memories archived.`;
     }
 
+    if (contradictions.length > 0) {
+      result.message = `Memory #${id} stored. Detected ${contradictions.length} possible contradiction(s); no memory was archived automatically.`;
+    }
     return result;
   } catch (err) {
     return { error: err.message };
@@ -244,6 +265,35 @@ export async function addMemoryInternal({ content, importance = 1.0, agent_id, s
 }
 
 const toolHandlers = new Map();
+
+const READ_ONLY_TOOLS = new Set([
+  'search_memories',
+  'get_memory',
+  'get_recent_memories',
+  'get_memories_as_of',
+  'get_important_memories',
+  'get_relationships',
+  'get_memory_versions',
+  'get_agent_stats',
+  'export_audit_log',
+  'verify_attestation',
+  'get_file_history',
+  'get_optimized_context',
+  'consolidate_memories'
+]);
+
+const DESTRUCTIVE_TOOLS = new Set(['delete_memory', 'delete_entity']);
+
+function getToolAnnotations(name) {
+  const readOnly = READ_ONLY_TOOLS.has(name);
+  const destructive = DESTRUCTIVE_TOOLS.has(name);
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: destructive,
+    idempotentHint: readOnly || destructive,
+    openWorldHint: false
+  };
+}
 
 /**
  * Programmatically execute any registered MCP tool.
@@ -271,7 +321,11 @@ export function registerTools(server) {
     if (typeof handler === 'function') {
       toolHandlers.set(name, handler);
     }
-    originalTool(...args);
+    originalTool(
+      ...args.slice(0, -1),
+      getToolAnnotations(name),
+      handler
+    );
     count++;
   };
 
@@ -312,7 +366,7 @@ export function registerTools(server) {
     async ({ query, limit, agent_id, session_id }) => {
       try {
         // Derive namespace from agent_id or PERSYST_PROJECT env
-        const namespace = agent_id || process.env.PERSYST_PROJECT || null;
+        const namespace = getAccessNamespace(agent_id);
         const results = await searchHybrid(query, limit, agent_id, session_id, namespace);
 
         // Broadcast retrieval event to SSE subscribers and monitor
@@ -330,7 +384,7 @@ export function registerTools(server) {
         return text({
           results,
           count: results.length,
-          namespace: namespace || 'all',
+          namespace: namespace || 'shared',
           attestation: results.attestation
         });
       } catch (err) {
@@ -349,7 +403,7 @@ export function registerTools(server) {
     },
     async ({ id, agent_id }) => {
       try {
-        const namespace = agent_id ? agent_id.toLowerCase() : null;
+        const namespace = getAccessNamespace(agent_id);
         const memory = getMemory(id, namespace);
         if (!memory) return text({ error: `Memory #${id} not found` });
 
@@ -392,7 +446,7 @@ export function registerTools(server) {
           return text({ error: validation.error });
         }
 
-        const namespace = normalizedAgentId;
+        const namespace = getAccessNamespace(normalizedAgentId);
         const oldMemory = getMemory(id, namespace);
         if (!oldMemory) return text({ error: `Memory #${id} not found` });
 
@@ -446,11 +500,11 @@ export function registerTools(server) {
     },
     async ({ id, agent_id }) => {
       try {
-        const namespace = agent_id ? agent_id.toLowerCase() : null;
+        const namespace = getAccessNamespace(agent_id);
         const memory = getMemory(id, namespace);
         if (!memory) return text({ error: `Memory #${id} not found` });
 
-        const deleted = deleteMemory(id);
+        const deleted = deleteMemory(id, namespace);
         if (!deleted) return text({ error: `Memory #${id} not found` });
 
         // Feature 1: Invalidate search cache on write
@@ -476,9 +530,36 @@ export function registerTools(server) {
     },
     async ({ limit, agent_id }) => {
       try {
-        const namespace = agent_id || process.env.PERSYST_PROJECT || null;
+        const namespace = getAccessNamespace(agent_id);
         const memories = getRecentMemories(limit, namespace);
-        return text({ memories, count: memories.length, namespace: namespace || 'all' });
+        return text({ memories, count: memories.length, namespace: namespace || 'shared' });
+      } catch (err) {
+        return text({ error: err.message });
+      }
+    }
+  );
+
+  // 6b. GET MEMORIES AS OF A HISTORICAL INSTANT
+  server.tool(
+    'get_memories_as_of',
+    'Reconstruct the workspace memories that were valid and known at a specific time. Useful for incident review, audits, and explaining which context an agent could have used.',
+    {
+      as_of: z.union([z.string(), z.number()]).describe('ISO-8601 date or Unix timestamp (seconds or milliseconds)'),
+      limit: z.number().int().min(1).max(500).default(50).describe('How many memories to return (default: 50, max: 500)'),
+      agent_id: z.string().optional().describe('Agent ID — filters to this agent\'s namespace + shared')
+    },
+    async ({ as_of, limit, agent_id }) => {
+      try {
+        const timestamp = parseAsOfTimestamp(as_of);
+        const namespace = getAccessNamespace(agent_id);
+        const memories = getMemoriesAsOf(timestamp, limit, namespace);
+        return text({
+          memories,
+          count: memories.length,
+          as_of: new Date(timestamp).toISOString(),
+          as_of_unix_ms: timestamp,
+          namespace: namespace || 'shared'
+        });
       } catch (err) {
         return text({ error: err.message });
       }
@@ -495,9 +576,9 @@ export function registerTools(server) {
     },
     async ({ limit, agent_id }) => {
       try {
-        const namespace = agent_id || process.env.PERSYST_PROJECT || null;
+        const namespace = getAccessNamespace(agent_id);
         const memories = getImportantMemories(limit, namespace);
-        return text({ memories, count: memories.length, namespace: namespace || 'all' });
+        return text({ memories, count: memories.length, namespace: namespace || 'shared' });
       } catch (err) {
         return text({ error: err.message });
       }
@@ -514,7 +595,8 @@ export function registerTools(server) {
     },
     async ({ repo_path, count }) => {
       try {
-        const commits = await getRecentCommits(repo_path, count);
+        const scopedRepoPath = assertWorkspacePath(repo_path);
+        const commits = await getRecentCommits(scopedRepoPath, count);
         let added = 0;
         let skipped = 0;
 
@@ -599,7 +681,7 @@ export function registerTools(server) {
     },
     async ({ entity_name, memory_id, relation, agent_id }) => {
       try {
-        const namespace = agent_id ? agent_id.toLowerCase() : null;
+        const namespace = getAccessNamespace(agent_id);
         const entity = getEntityByName(entity_name);
         if (!entity) return text({ error: `Entity "${entity_name}" not found.` });
 
@@ -619,14 +701,15 @@ export function registerTools(server) {
     'search_by_entity',
     'Find all memories linked to a specific entity.',
     {
-      entity_name: z.string().describe('Name of the entity to search for')
+      entity_name: z.string().describe('Name of the entity to search for'),
+      agent_id: z.string().optional().describe('Agent ID used to enforce private-memory visibility')
     },
-    async ({ entity_name }) => {
+    async ({ entity_name, agent_id }) => {
       try {
         const entity = getEntityByName(entity_name);
         if (!entity) return text({ error: `Entity "${entity_name}" not found` });
 
-        const memories = getMemoriesByEntity(entity.id);
+        const memories = getMemoriesByEntity(entity.id, getAccessNamespace(agent_id));
         return text({ entity, memories, count: memories.length });
       } catch (err) {
         return text({ error: err.message });
@@ -663,7 +746,9 @@ export function registerTools(server) {
         // Fallback to LIKE query on memories content if FTS is empty or fails
         if (hits.length === 0) {
           try {
-            const likeRows = db.prepare("SELECT id FROM memories WHERE content LIKE ? LIMIT 5").all(`%${query}%`);
+            const likeRows = db.prepare(
+              'SELECT id FROM memories WHERE workspace_id = ? AND content LIKE ? LIMIT 5'
+            ).all(WORKSPACE_ID, `%${query}%`);
             hits = likeRows;
           } catch (_) {}
         }
@@ -756,14 +841,15 @@ export function registerTools(server) {
     'get_file_history',
     'Fetch all commit memories and architectural choices that modified a specific file.',
     {
-      file_path: z.string().describe('Relative or absolute file path')
+      file_path: z.string().describe('Relative or absolute file path'),
+      agent_id: z.string().optional().describe('Agent ID used to enforce private-memory visibility')
     },
-    async ({ file_path }) => {
+    async ({ file_path, agent_id }) => {
       try {
         const entity = getEntityByName(file_path);
         if (!entity) return text({ message: `No git history entity found for file: ${file_path}`, memories: [] });
 
-        const memories = getMemoriesByEntity(entity.id);
+        const memories = getMemoriesByEntity(entity.id, getAccessNamespace(agent_id));
         return text({ file_path, memories, count: memories.length });
       } catch (err) {
         return text({ error: err.message });
@@ -780,14 +866,15 @@ export function registerTools(server) {
     },
     async ({ repo_path }) => {
       try {
-        if (watchers.has(repo_path)) {
-          return text({ success: true, message: `Repository ${repo_path} is already being watched.` });
+        const scopedRepoPath = assertWorkspacePath(repo_path);
+        if (watchers.has(scopedRepoPath)) {
+          return text({ success: true, message: `Repository ${scopedRepoPath} is already being watched.` });
         }
 
         const intervalId = setInterval(async () => {
-          console.error(`[persyst-watcher] Running scheduled ingestion for: ${repo_path}`);
+          console.error(`[scopekeep-watcher] Running scheduled ingestion for: ${scopedRepoPath}`);
           try {
-            const result = await getRecentCommits(repo_path, 10);
+            const result = await getRecentCommits(scopedRepoPath, 10);
             let added = 0;
             for (const commit of result) {
               const hashPrefix = commit.hash.slice(0, 7);
@@ -813,15 +900,15 @@ export function registerTools(server) {
             }
             if (added > 0) {
               searchCache.invalidate();
-              console.error(`[persyst-watcher] Ingested ${added} new commits from ${repo_path}`);
+              console.error(`[scopekeep-watcher] Ingested ${added} new commits from ${scopedRepoPath}`);
             }
           } catch (e) {
-            console.error(`[persyst-watcher] Ingestion failed for ${repo_path}: ${e.message}`);
+            console.error(`[scopekeep-watcher] Ingestion failed for ${scopedRepoPath}: ${e.message}`);
           }
         }, 300000); // 5 minutes
 
-        watchers.set(repo_path, intervalId);
-        return text({ success: true, message: `Started watching repository at ${repo_path}` });
+        watchers.set(scopedRepoPath, intervalId);
+        return text({ success: true, message: `Started watching repository at ${scopedRepoPath}` });
       } catch (err) {
         return text({ error: err.message });
       }
@@ -841,7 +928,7 @@ export function registerTools(server) {
     },
     async ({ query, max_tokens, agent_id, session_id, intent }) => {
       try {
-        const namespace = agent_id || process.env.PERSYST_PROJECT || null;
+        const namespace = getAccessNamespace(agent_id);
         const contextData = await getOptimizedContext(query, max_tokens, agent_id, session_id, namespace, intent);
 
         // Broadcast context retrieval event
@@ -868,11 +955,11 @@ export function registerTools(server) {
   // 19. CONSOLIDATE MEMORIES
   server.tool(
     'consolidate_memories',
-    'Manually trigger the semantic deduplication sweep to merge highly similar memories (similarity > 0.85).',
+    'Review highly similar memories and return non-destructive merge proposals. Durable facts are never changed automatically.',
     {},
     async () => {
       try {
-        const report = await consolidateMemories();
+        const report = await consolidateMemories(getAccessNamespace(null));
         return text(report);
       } catch (err) {
         return text({ error: err.message });

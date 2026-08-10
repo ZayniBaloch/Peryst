@@ -1,6 +1,8 @@
 # Sample Compliance Audit Trail Output
 
-This document contains a structured example of the JSON data returned from the `/compliance/export` endpoint. This ledger is used by security compliance officers to audit the queries, retrieved memories, and system integrity of the Persyst local-first memory layer.
+> **Status:** Illustrative output only. A signed chain is retrieval evidence, not a certification or proof that the surrounding deployment is compliant.
+
+This document contains a structured example of the JSON data returned from the `/compliance/export` endpoint. This ledger is used by security compliance officers to audit the queries, retrieved memories, and system integrity of the ScopeKeep local-first memory layer.
 
 ---
 
@@ -13,7 +15,7 @@ This document contains a structured example of the JSON data returned from the `
     "start_date": "2026-06-01T00:00:00.000Z",
     "end_date": "2026-06-26T23:59:59.000Z",
     "total_attestations": 1,
-    "system_integrity": "SECURE"
+    "system_integrity": "VERIFIED"
   },
   "agent_stats": [
     {

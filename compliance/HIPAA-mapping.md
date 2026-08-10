@@ -1,27 +1,29 @@
-# Persyst Compliance Control Mapping: HIPAA Security & Privacy
+# Historical HIPAA Security & Privacy Control Mapping
 
-This document describes how Persyst enables healthcare developers to leverage AI agents (such as Cursor, Claude Code, Aider, and Roo Code) without compromising HIPAA (Health Insurance Portability and Accountability Act) compliance or requiring complex Business Associate Agreements (BAAs) for the local memory layer.
+> **Status:** Engineering mapping draft, not a certification, legal opinion, or substitute for a HIPAA risk analysis or Business Associate Agreement assessment.
+
+This document describes controls that may help healthcare developers assess the use of AI coding agents. ScopeKeep does not guarantee HIPAA compliance and does not determine whether a BAA is required.
 
 ---
 
-## 1. No Protected Health Information (PHI) Egress
+## 1. Local ScopeKeep Processing Boundary
 Under HIPAA, transmitting Protected Health Information (PHI) to third-party APIs requires a Business Associate Agreement (BAA). 
 
-* **Persyst Boundary**: Persyst runs **100% offline and locally**. All data storage (SQLite), vector embeddings (ONNX Runtime), and semantic matches are processed locally on the client machine or inside the enterprise private cloud.
-* **No BAA Required**: Because Persyst does not store, transmit, or process data on its own servers (as there are none), Persyst does not act as a Business Associate. Healthcare organizations retain complete physical and logical custody of all files, logs, and database records.
+* **ScopeKeep Boundary**: ScopeKeep stores memory, computes embeddings, and performs semantic matches locally. It does not initiate cloud synchronization.
+* **Surrounding Data Flows**: An MCP client may send retrieved context to its configured AI provider. Whether a BAA is required depends on the actual parties, deployment, data, and services and must be assessed by the healthcare organization.
 
 ---
 
 ## 2. Access Control and Technical Safeguards (§ 164.312)
 
 ### A. Access Control (§ 164.312(a))
-* **Local OS Authentication**: Persyst inherits the underlying operating system's access controls. Files stored under the user's home directory (`~/.persyst/`) are protected by user-level directory permissions.
+* **Local OS Authentication**: ScopeKeep inherits the underlying operating system's access controls. Workspace databases under `~/.scopekeep/` rely on user-level permissions and should be protected with full-disk encryption.
 * **Namespace Isolation**: Multiprocess or swarm-based setups can partition data using namespace parameters, ensuring distinct sub-agents only query data specifically approved for their context scope.
 
 ### B. Audit Controls (§ 164.312(b))
-* **Cryptographic Ledger**: Persyst automatically records a tamper-evident audit trail of all memories retrieved during AI developer sessions.
-* **Tamper-Evident Chain**: Every retrieval event creates an Ed25519 signature linked to the previous block's hash. A list of all historical retrievals can be exported at any time via the `/compliance/export` endpoint to prove no unauthorized context leaks or manual data modifications occurred.
+* **Cryptographic Ledger**: ScopeKeep automatically records a tamper-evident audit trail of all memories retrieved during AI developer sessions.
+* **Tamper-Evident Chain**: Retrieval evidence can be signed and linked to the previous record's hash. This can detect some record changes; it does not prove that no unauthorized context access or database modification occurred.
 
 ### C. Transmission Security (§ 164.312(e))
-* **No Cloud Transmission**: Data is never sent across public networks.
+* **Local-First Default**: Core storage and retrieval are local. Operators must separately review any explicitly enabled cloud extraction, integrations, backups, telemetry, and surrounding AI clients.
 * **Local Loopback Encryption**: If the HTTP gateway is enabled, it binds strictly to `127.0.0.1` by default to prevent external listening. For multi-node swarms, TLS/HTTPS configuration is required.

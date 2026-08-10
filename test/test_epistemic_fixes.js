@@ -25,9 +25,9 @@ test.before(() => {
   server = new McpServer({ name: 'test-fixes', version: '1.0.0' });
   
   const originalTool = server.tool;
-  server.tool = (name, desc, schema, callback) => {
-    handlers[name] = callback;
-    return originalTool.call(server, name, desc, schema, callback);
+  server.tool = (...args) => {
+    handlers[args[0]] = args[args.length - 1];
+    return originalTool.call(server, ...args);
   };
   
   registerTools(server);
@@ -65,17 +65,17 @@ test('Epistemic Resolutions & QA Stress-Test Fixes', async (t) => {
     assert.equal(workerStats, undefined, 'antigravity-worker should be ignored from reputation stats');
 
     // 1c. Insert memory as log-watcher (antigravity-worker) to test ghost re-attribution
-    const watcherMemId = insertMemory('Persyst primary database is PostgreSQL.', 0.9, {
+    const watcherMemId = insertMemory('ScopeKeep primary database is PostgreSQL.', 0.9, {
       source_type: 'agent',
       source_id: 'antigravity-worker',
       confidence: 0.8
     }, 'shared');
-    const watcherEmb = await generateEmbedding('Persyst primary database is PostgreSQL.');
+    const watcherEmb = await generateEmbedding('ScopeKeep primary database is PostgreSQL.');
     insertVector(watcherMemId, watcherEmb);
 
     // Calling add_memory with agent-trusted (cased as AGENT-TRUSTED) should re-attribute it
     const resA = await addMemoryHandler({
-      content: 'Persyst primary database is PostgreSQL.',
+      content: 'ScopeKeep primary database is PostgreSQL.',
       agent_id: 'AGENT-TRUSTED',
       importance: 0.9,
       shared: true
@@ -89,7 +89,7 @@ test('Epistemic Resolutions & QA Stress-Test Fixes', async (t) => {
 
     // Agent Untrusted tries to store a contradictory fact
     const resB = await addMemoryHandler({
-      content: 'Persyst primary database is MongoDB.',
+      content: 'ScopeKeep primary database is MongoDB.',
       agent_id: 'agent-untrusted',
       importance: 0.9,
       shared: true
@@ -97,17 +97,18 @@ test('Epistemic Resolutions & QA Stress-Test Fixes', async (t) => {
     const dataB = JSON.parse(resB.content[0].text);
     assert.ok(dataB.success);
     assert.ok(dataB.message.includes('contradiction'));
-    assert.equal(dataB.contradictions_detected[0].resolution, 'kept_old');
+    assert.equal(dataB.contradictions_detected[0].status, 'review_required');
+    assert.equal(dataB.contradictions_detected[0].suggested_resolution, 'prefer_existing');
 
     // Verify Agent Trusted's memory is active, and Agent Untrusted's memory is archived immediately
     const memA = getMemoryById(dataA.id);
     assert.ok(memA, 'Trusted agent memory should remain active');
     
     const memB = getMemoryById(dataB.id);
-    assert.equal(memB, null, 'Untrusted agent memory should be archived immediately');
+    assert.ok(memB, 'Potentially contradictory memory remains active pending review');
 
     const archivedB = getAnyMemoryById(dataB.id);
-    assert.ok(archivedB.valid_until !== null, 'Untrusted agent memory valid_until should be populated');
+    assert.equal(archivedB.valid_until, null, 'No automatic archival is allowed');
 
     // Verify reputation updates
     const statsRes2 = await getStatsHandler();
@@ -115,8 +116,8 @@ test('Epistemic Resolutions & QA Stress-Test Fixes', async (t) => {
     const trustedStats = stats2.find(s => s.agent_id === 'agent-trusted');
     const untrustedStats = stats2.find(s => s.agent_id === 'agent-untrusted');
     
-    assert.equal(trustedStats.memories_confirmed, 3, 'Trusted agent should be confirmed again');
-    assert.equal(untrustedStats.memories_contradicted, 2, 'Untrusted agent contradicted should increment');
+    assert.equal(trustedStats.memories_confirmed, 2, 'A proposal must not change reputation counters');
+    assert.equal(untrustedStats.memories_contradicted, 1, 'A proposal must not penalize an agent');
   });
 
   await t.test('2. Versioning Updates (Same Agent) does not penalize reputation', async () => {
@@ -175,15 +176,18 @@ test('Epistemic Resolutions & QA Stress-Test Fixes', async (t) => {
     const data = JSON.parse(res.content[0].text);
     
     assert.ok(data.success);
+    assert.equal(data.mode, 'review_only');
+    assert.ok(data.proposed_groups >= 1, 'Similar memories should produce a review proposal');
+    assert.equal(data.consolidated_groups, 0, 'Review-only consolidation must not mutate memories');
     
-    // Check that canonical one remains, others archived
+    // All facts remain active until an explicit review action.
     const active1 = getMemoryById(dup1);
     assert.ok(active1);
-    assert.equal(getMemoryById(dup2), null, 'Duplicate should be consolidated');
-    assert.equal(getMemoryById(dup3), null, 'Duplicate should be consolidated');
+    assert.ok(getMemoryById(dup2), 'Duplicate candidate remains active before review');
+    assert.ok(getMemoryById(dup3), 'Duplicate candidate remains active before review');
 
     // Confirm that the content is NOT concatenated into a Frankenstein sentence
-    assert.equal(active1.content, 'The local build is optimized for release.', 'Canonical memory content should remain clean');
+    assert.equal(active1.content, 'The local build is optimized for release.', 'Candidate content should remain unchanged');
   });
 
   await t.test('4. Graph Hopping Traversal in Context Retrieval (depth 6 BFS / Implicit hopping)', async () => {

@@ -6,10 +6,16 @@
  */
 
 import crypto from 'crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import db, { stmts, getLastAttestation, insertAttestation, getAttestationById } from './database.js';
+import db, {
+  stmts,
+  appendAttestation,
+  getAttestationById,
+  redactSecrets,
+  WORKSPACE_ID
+} from './database.js';
 
 const KEYS_DIR = join(homedir(), '.persyst', 'keys');
 
@@ -26,9 +32,10 @@ export function initializeKeys() {
       publicKeyEncoding: { type: 'spki', format: 'pem' },
       privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
     });
-    writeFileSync(pubPath, publicKey);
-    writeFileSync(privPath, privateKey);
-    console.error('[persyst] Generated new Ed25519 keypair for attestation');
+    writeFileSync(pubPath, publicKey, { mode: 0o644 });
+    writeFileSync(privPath, privateKey, { mode: 0o600 });
+    try { chmodSync(privPath, 0o600); } catch (_) { /* Windows ACLs are managed by the OS. */ }
+    console.error('[scopekeep] Generated new Ed25519 keypair for attestation');
   }
 }
 
@@ -73,48 +80,33 @@ export function createAttestation(query, memories, agentId = null, sessionId = n
     };
   });
 
-  // Fetch previous attestation hash for the hash chain
-  const lastAtt = getLastAttestation();
-  const previousHash = lastAtt ? lastAtt.hash : null;
+  const redactedQuery = redactSecrets(String(query || '')).slice(0, 2000);
+  const storedQuery = process.env.PERSYST_ATTEST_QUERY_TEXT === '1'
+    ? redactedQuery
+    : `sha256:${crypto.createHash('sha256').update(redactedQuery).digest('hex')}`;
 
-  // Construct document to sign (ordered keys to ensure canonical serialization)
-  const doc = {
-    attestation_id: attestationId,
-    query,
-    timestamp,
-    memories_retrieved: memoriesRetrieved,
-    agent_id: agentId || null,
-    session_id: sessionId || null,
-    previous_hash: previousHash
-  };
+  return appendAttestation((lastAtt) => {
+    const doc = {
+      attestation_id: attestationId,
+      query: storedQuery,
+      timestamp,
+      memories_retrieved: memoriesRetrieved,
+      agent_id: agentId || null,
+      session_id: sessionId || null,
+      workspace_id: WORKSPACE_ID,
+      previous_hash: lastAtt ? lastAtt.hash : null
+    };
 
-  const dataToSign = JSON.stringify(doc);
-
-  // Sign document using Ed25519
-  const privateKey = getPrivateKey();
-  const signature = crypto.sign(null, Buffer.from(dataToSign), {
-    key: privateKey,
-    type: 'pkcs8',
-    format: 'pem'
-  }).toString('hex');
-
-  // Construct full record and compute its hash
-  const fullAttestation = {
-    ...doc,
-    signature
-  };
-
-  const hash = crypto.createHash('sha256').update(JSON.stringify(fullAttestation)).digest('hex');
-
-  const record = {
-    ...fullAttestation,
-    hash
-  };
-
-  // Persist to DB
-  insertAttestation(record);
-
-  return record;
+    const dataToSign = JSON.stringify(doc);
+    const signature = crypto.sign(null, Buffer.from(dataToSign), {
+      key: getPrivateKey(),
+      type: 'pkcs8',
+      format: 'pem'
+    }).toString('hex');
+    const fullAttestation = { ...doc, signature };
+    const hash = crypto.createHash('sha256').update(JSON.stringify(fullAttestation)).digest('hex');
+    return { ...fullAttestation, hash };
+  });
 }
 
 /**
@@ -131,6 +123,7 @@ export function verifyAttestationRecord(attestation) {
         : attestation.memories_retrieved,
       agent_id: attestation.agent_id || null,
       session_id: attestation.session_id || null,
+      workspace_id: attestation.workspace_id,
       previous_hash: attestation.previous_hash || null
     };
 
@@ -144,10 +137,10 @@ export function verifyAttestationRecord(attestation) {
     // Check hash first — if it matches, doc reconstruction is correct
     const hashMatch = computedHash === attestation.hash;
     if (!hashMatch) {
-      console.error('[persyst-attest] HASH MISMATCH for', attestation.attestation_id);
-      console.error('[persyst-attest] stored hash:', attestation.hash);
-      console.error('[persyst-attest] computed hash:', computedHash);
-      console.error('[persyst-attest] doc:', JSON.stringify(doc));
+      console.error('[scopekeep-attest] HASH MISMATCH for', attestation.attestation_id);
+      console.error('[scopekeep-attest] stored hash:', attestation.hash);
+      console.error('[scopekeep-attest] computed hash:', computedHash);
+      console.error('[scopekeep-attest] doc:', JSON.stringify(doc));
       return { valid: false, error: 'Attestation hash mismatch' };
     }
 
@@ -166,11 +159,11 @@ export function verifyAttestationRecord(attestation) {
     );
 
     if (!isSignatureValid) {
-      console.error('[persyst-attest] SIG VERIFY FAIL for', attestation.attestation_id);
-      console.error('[persyst-attest] Hash matches but signature invalid');
-      console.error('[persyst-attest] dataToSign:', dataToSign);
-      console.error('[persyst-attest] signature:', attestation.signature);
-      console.error('[persyst-attest] public key:', publicKey);
+      console.error('[scopekeep-attest] SIG VERIFY FAIL for', attestation.attestation_id);
+      console.error('[scopekeep-attest] Hash matches but signature invalid');
+      console.error('[scopekeep-attest] dataToSign:', dataToSign);
+      console.error('[scopekeep-attest] signature:', attestation.signature);
+      console.error('[scopekeep-attest] public key:', publicKey);
       return { valid: false, error: 'Signature verification failed' };
     }
 
@@ -207,7 +200,7 @@ export function verifyChainIntegrity(attestationId) {
       return { valid: false, error: 'Broken chain: chain length exceeds maximum' };
     }
 
-    const prevAtt = stmts.getAttestationByHash.get(current.previous_hash);
+    const prevAtt = stmts.getAttestationByHash.get(current.previous_hash, WORKSPACE_ID);
     if (!prevAtt) {
       return { valid: false, error: `Broken chain: Previous attestation with hash ${current.previous_hash} not found` };
     }

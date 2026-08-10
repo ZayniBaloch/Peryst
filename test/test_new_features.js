@@ -6,6 +6,7 @@ import db, {
   insertVector,
   getMemory,
   getAnyMemoryById,
+  getMemoriesAsOf,
   logContradiction,
   getProvenance,
   incrementAgentStat,
@@ -56,6 +57,16 @@ test('Production-Grade Feature Enhancements', async (t) => {
     assert.ok(archivedMem1);
     assert.ok(archivedMem1.valid_until !== null, 'Old memory has valid_until set');
 
+    // Historical reconstruction has an exact, non-overlapping hand-off.
+    const replacement = getAnyMemoryById(memId2);
+    assert.equal(archivedMem1.valid_until, replacement.valid_from);
+    const beforeUpdate = getMemoriesAsOf(archivedMem1.valid_until - 1, 20);
+    const atUpdate = getMemoriesAsOf(archivedMem1.valid_until, 20);
+    assert.ok(beforeUpdate.some(memory => memory.id === memId1), 'Old version is visible before the hand-off');
+    assert.ok(!beforeUpdate.some(memory => memory.id === memId2), 'New version is hidden before the hand-off');
+    assert.ok(!atUpdate.some(memory => memory.id === memId1), 'Old version is hidden at the hand-off');
+    assert.ok(atUpdate.some(memory => memory.id === memId2), 'New version is visible at the hand-off');
+
     // 5. Verify contradiction is logged
     const contradiction = db.prepare('SELECT * FROM contradictions WHERE old_memory_id = ?').get(memId1);
     assert.ok(contradiction);
@@ -102,7 +113,7 @@ test('Production-Grade Feature Enhancements', async (t) => {
     assert.ok(attestation.attestation_id);
     assert.ok(attestation.signature);
     assert.ok(attestation.hash);
-    assert.equal(attestation.query, 'Node version query');
+    assert.match(attestation.query, /^sha256:[a-f0-9]{64}$/, 'Raw query text is not retained by default');
 
     // 2. Verify signature and chain
     const verification = verifyChainIntegrity(attestation.attestation_id);
@@ -126,19 +137,20 @@ test('Production-Grade Feature Enhancements', async (t) => {
     // Run consolidation
     const report = await consolidateMemories();
     assert.ok(report.success);
-    assert.equal(report.consolidated_groups, 1, 'Should consolidate the similar memories group');
+    assert.equal(report.mode, 'review_only');
+    assert.equal(report.consolidated_groups, 0, 'Consolidation must not mutate durable facts');
+    assert.equal(report.proposed_groups, 1, 'Should propose the similar memories group for review');
 
     // dup1 was the canonical one (highest importance 0.8)
     const activeCanonical = getMemory(dup1);
     assert.ok(activeCanonical, 'Canonical memory should remain active');
     
-    // Check that duplicates are archived
-    assert.equal(getMemory(dup2), null, 'Duplicate 2 should be archived');
-    assert.equal(getMemory(dup3), null, 'Duplicate 3 should be archived');
+    // Candidates remain active until an explicit reviewer action.
+    assert.ok(getMemory(dup2), 'Duplicate candidate 2 should remain active');
+    assert.ok(getMemory(dup3), 'Duplicate candidate 3 should remain active');
 
     // Verification of contradiction links
     const contradictionLink = db.prepare('SELECT * FROM contradictions WHERE old_memory_id = ?').get(dup2);
-    assert.ok(contradictionLink);
-    assert.equal(contradictionLink.new_memory_id, dup1);
+    assert.equal(contradictionLink, undefined, 'Review proposals must not write contradiction links');
   });
 });

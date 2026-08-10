@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * persyst-aider — Aider wrapper with automatic Persyst memory injection
+ * persyst-aider — Aider wrapper with automatic ScopeKeep memory injection
  * 
  * Usage:
  *   npx persyst-aider [aider-args...]
@@ -11,8 +11,8 @@
  *   npx persyst-aider --model openai/gpt-4o --auto-commits
  * 
  * How it works:
- *   1. On startup: connects to Persyst, ingests recent git commits
- *   2. Before each prompt: queries Persyst for relevant memories, prepends context
+ *   1. On startup: connects to ScopeKeep, ingests recent git commits
+ *   2. Before each prompt: queries ScopeKeep for relevant memories, prepends context
  *   3. On exit: ingests any new git commits created during the session
  * 
  * Design decisions:
@@ -40,14 +40,14 @@ const CWD = process.cwd();
 
 let persystClient = null;
 
-async function connectToPersyst() {
+async function connectToScopeKeep() {
   if (persystClient) return persystClient;
 
   const persystPath = resolve(__dirname, '..', 'index.js');
 
   const transport = new StdioClientTransport({
     command: 'node',
-    args: [persystPath]
+    args: [scopekeepPath]
   });
 
   persystClient = new Client({
@@ -60,7 +60,7 @@ async function connectToPersyst() {
 }
 
 async function callTool(toolName, args) {
-  const client = await connectToPersyst();
+  const client = await connectToScopeKeep();
   const result = await client.callTool({ name: toolName, arguments: args });
   if (result.content && result.content[0] && result.content[0].text) {
     return JSON.parse(result.content[0].text);
@@ -68,7 +68,7 @@ async function callTool(toolName, args) {
   return null;
 }
 
-async function closePersyst() {
+async function closeScopeKeep() {
   if (persystClient) {
     try { await persystClient.close(); } catch (_) {}
     persystClient = null;
@@ -89,10 +89,10 @@ async function ingestGitCommits() {
       count: 15
     });
     if (result && result.added > 0) {
-      console.error(`[persyst] Ingested ${result.added} git commits into memory`);
+      console.error(`[scopekeep] Ingested ${result.added} git commits into memory`);
     }
   } catch (_) {
-    // Not a git repo or Persyst unavailable — silent
+    // Not a git repo or ScopeKeep unavailable — silent
   }
 }
 
@@ -112,7 +112,7 @@ async function getMemoryContext(prompt) {
       return null;
     }
 
-    const lines = ['[Persyst Memory — auto-retrieved context]'];
+    const lines = ['[ScopeKeep Memory — auto-retrieved context]'];
     for (const mem of result.results) {
       lines.push(`• ${mem.content}`);
     }
@@ -133,22 +133,22 @@ async function main() {
   const aiderArgs = process.argv.slice(2);
 
   // Check if Aider is available
-  console.error('[persyst] Starting Aider with Persyst memory...');
+  console.error('[scopekeep] Starting Aider with ScopeKeep memory...');
 
-  // Step 1: Connect to Persyst and ingest git history
+  // Step 1: Connect to ScopeKeep and ingest git history
   try {
-    await connectToPersyst();
-    console.error('[persyst] Connected to memory server ✓');
+    await connectToScopeKeep();
+    console.error('[scopekeep] Connected to memory server ✓');
     await ingestGitCommits();
   } catch (err) {
-    console.error(`[persyst] Warning: Could not connect to memory server: ${err.message}`);
-    console.error('[persyst] Aider will run without memory injection.');
+    console.error(`[scopekeep] Warning: Could not connect to memory server: ${err.message}`);
+    console.error('[scopekeep] Aider will run without memory injection.');
   }
 
   // Step 2: Spawn Aider as a child process
-  const aider = spawn('aider', aiderArgs, {
+  const cmd = process.platform === 'win32' ? 'aider.cmd' : 'aider';
+  const aider = spawn(cmd, aiderArgs, {
     stdio: ['pipe', 'inherit', 'inherit'],
-    shell: true,
     cwd: CWD
   });
 
@@ -168,7 +168,7 @@ async function main() {
         if (context) {
           // Prepend memory context to the prompt
           aider.stdin.write(context);
-          console.error(`[persyst] Injected ${context.split('\n').length - 3} memories`);
+          console.error(`[scopekeep] Injected ${context.split('\n').length - 3} memories`);
         }
       } catch (_) {
         // Memory injection failed — just pass through the original prompt
@@ -186,9 +186,9 @@ async function main() {
 
   // Step 4: On Aider exit, ingest any new commits and clean up
   aider.on('close', async (code) => {
-    console.error('[persyst] Aider session ended. Indexing new commits...');
+    console.error('[scopekeep] Aider session ended. Indexing new commits...');
     await ingestGitCommits();
-    await closePersyst();
+    await closeScopeKeep();
     process.exit(code || 0);
   });
 
@@ -199,6 +199,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error(`[persyst] Fatal error: ${err.message}`);
+  console.error(`[scopekeep] Fatal error: ${err.message}`);
   process.exit(1);
 });

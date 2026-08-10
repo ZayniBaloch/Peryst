@@ -40,11 +40,11 @@ const __dirname = dirname(__filename);
 // PATHS
 // ============================================================
 
-const PERSYST_DIR = join(homedir(), '.persyst');
-const QUEUE_DIR = join(PERSYST_DIR, 'queue');
-const FAILED_DIR = join(PERSYST_DIR, 'queue', 'failed');
+const SCOPEKEEP_DIR = process.env.SCOPEKEEP_DIR || process.env.PERSYST_DIR || join(homedir(), '.scopekeep');
+const QUEUE_DIR = join(SCOPEKEEP_DIR, 'queue');
+const FAILED_DIR = join(SCOPEKEEP_DIR, 'queue', 'failed');
 const LOCK_FILE = join(QUEUE_DIR, '.worker.lock');
-const LOG_FILE = join(PERSYST_DIR, 'worker.log');
+const LOG_FILE = join(SCOPEKEEP_DIR, 'worker.log');
 
 mkdirSync(QUEUE_DIR, { recursive: true });
 mkdirSync(FAILED_DIR, { recursive: true });
@@ -119,7 +119,14 @@ function parseJsonArray(text) {
   }
 }
 
+function isCloudEgressAllowed() {
+  return process.env.SCOPEKEEP_ALLOW_CLOUD_EGRESS === '1' || process.env.PERSYST_ALLOW_CLOUD_EGRESS === '1';
+}
+
 function extractAnthropic(text, apiKey) {
+  if (!isCloudEgressAllowed()) {
+    return Promise.reject(new Error('Cloud egress disabled. Set SCOPEKEEP_ALLOW_CLOUD_EGRESS=1 to enable external Anthropic API extraction.'));
+  }
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
       model: 'claude-3-5-sonnet-20241022',
@@ -170,6 +177,9 @@ function extractAnthropic(text, apiKey) {
 }
 
 function extractOpenAI(text, apiKey) {
+  if (!isCloudEgressAllowed()) {
+    return Promise.reject(new Error('Cloud egress disabled. Set SCOPEKEEP_ALLOW_CLOUD_EGRESS=1 to enable external OpenAI API extraction.'));
+  }
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
       model: 'gpt-4o-mini',

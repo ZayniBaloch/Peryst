@@ -1,6 +1,6 @@
 /**
  * TypeScript type declarations for the Persyst Developer SDK.
- * Import via: import { Persyst } from 'persyst-mcp/sdk'
+ * Import via: import { Persyst } from 'scopekeep/sdk'
  */
 
 export interface PersystConfig {
@@ -18,6 +18,8 @@ export interface PersystConfig {
   /** Optional API key for gateway authorization */
   apiKey?: string | null;
 }
+
+export type ScopeKeepConfig = PersystConfig;
 
 export interface TrackOptions {
   /** Active session or thread identifier */
@@ -127,7 +129,7 @@ export interface ContextResult {
  *
  * @example
  * ```ts
- * import { Persyst } from 'persyst-mcp/sdk';
+ * import { Persyst } from 'scopekeep/sdk';
  *
  * const persyst = new Persyst();
  *
@@ -173,3 +175,6 @@ export declare class Persyst {
    */
   context(contextQuery: ContextOptions): Promise<ContextResult>;
 }
+
+/** Preferred branded SDK export. */
+export declare class ScopeKeep extends Persyst {}

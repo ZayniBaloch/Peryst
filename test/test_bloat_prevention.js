@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import db, { closeDatabase, insertMemory, insertVector, archiveExpiredMemories } from '../src/database.js';
+import db, { closeDatabase, insertMemory, insertVector, archiveExpiredMemories, WORKSPACE_ID } from '../src/database.js';
 import { extractHeuristic } from '../src/extractor-heuristic.js';
 import { getOptimizedContext } from '../src/search.js';
 import { generateEmbedding } from '../src/embeddings.js';
@@ -41,15 +41,15 @@ test('Context Bloat Prevention & Optimization', async (t) => {
     // 1. Insert a transient note (created 15 days ago)
     const oldTime = Math.floor(Date.now() / 1000) - (15 * 24 * 60 * 60);
     const idExpired = db.prepare(`
-      INSERT INTO memories (content, importance_score, created_at, last_accessed, namespace)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('Note: This is a transient note that should be expired.', 0.9, oldTime, oldTime, 'shared').lastInsertRowid;
+      INSERT INTO memories (content, importance_score, created_at, last_accessed, namespace, workspace_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('Note: This is a transient note that should be expired.', 0.9, oldTime, oldTime, 'shared', WORKSPACE_ID).lastInsertRowid;
 
     // 2. Insert a permanent rule (created 15 days ago)
     const idPermanent = db.prepare(`
-      INSERT INTO memories (content, importance_score, created_at, last_accessed, namespace)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('Rule: Always follow ES module conventions.', 0.9, oldTime, oldTime, 'shared').lastInsertRowid;
+      INSERT INTO memories (content, importance_score, created_at, last_accessed, namespace, workspace_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('Rule: Always follow ES module conventions.', 0.9, oldTime, oldTime, 'shared', WORKSPACE_ID).lastInsertRowid;
 
     // Run auto-expiry check
     const archivedCount = archiveExpiredMemories();

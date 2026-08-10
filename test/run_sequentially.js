@@ -4,7 +4,7 @@ import { join } from 'path';
 
 const testDir = './test';
 const files = readdirSync(testDir)
-  .filter(f => (f.startsWith('test_') || f === 'smoke.js') && f.endsWith('.js'))
+  .filter(f => (f.startsWith('test_') || f.startsWith('benchmark_') || f === 'smoke.js') && f.endsWith('.js'))
   .sort()
   .map(f => join(testDir, f));
 

@@ -9,7 +9,7 @@ on:
 
 jobs:
   # ============================================================
-  # TEST JOB — runs on every push and PR
+  # TEST JOB - runs on every push and PR
   # ============================================================
   test:
     name: Test (Node ${{ matrix.node-version }}, ${{ matrix.os }})
@@ -33,13 +33,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run smoke tests
+      - name: Run complete test suite
         run: npm test
         env:
           NODE_ENV: test
 
   # ============================================================
-  # PUBLISH JOB — runs only on version tags (v*)
+  # PUBLISH JOB - runs only on version tags (v*)
   # ============================================================
   publish:
     name: Publish to npm
@@ -72,7 +72,7 @@ jobs:
           echo "Package version: $PKG_VERSION"
           echo "Tag version: $TAG_VERSION"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ Version mismatch: package.json=$PKG_VERSION, tag=$TAG_VERSION"
+            echo "Version mismatch: package.json=$PKG_VERSION, tag=$TAG_VERSION"
             exit 1
           fi
 

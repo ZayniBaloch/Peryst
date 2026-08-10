@@ -6,11 +6,11 @@
  * Allows developers to test and run extraction on demand.
  * 
  * Usage:
- *   npx persyst-mcp extract "I prefer TypeScript over JavaScript"
- *   npx persyst-mcp extract --file conversation.txt
- *   npx persyst-mcp extract --tier heuristic "we decided to use PostgreSQL"
- *   npx persyst-mcp extract --provider gemini "our stack uses Next.js"
- *   npx persyst-mcp extract --dry-run "always use camelCase"
+ *   npx scopekeep extract "I prefer TypeScript over JavaScript"
+ *   npx scopekeep extract --file conversation.txt
+ *   npx scopekeep extract --tier heuristic "we decided to use PostgreSQL"
+ *   npx scopekeep extract --provider gemini "our stack uses Next.js"
+ *   npx scopekeep extract --dry-run "always use camelCase"
  */
 
 import { argv, stdin, stdout } from 'process';
@@ -45,12 +45,12 @@ for (let i = 0; i < args.length; i++) {
 
 if (flags.help || args.length === 0) {
   console.log(`
-  Persyst Extract — Manual Fact Extraction CLI
+  ScopeKeep Extract — Manual Fact Extraction CLI
 
   USAGE:
-    npx persyst-mcp extract <text>           Extract from text
-    npx persyst-mcp extract --file <path>    Extract from file
-    echo "text" | npx persyst-mcp extract -  Extract from stdin
+    npx scopekeep extract <text>           Extract from text
+    npx scopekeep extract --file <path>    Extract from file
+    echo "text" | npx scopekeep extract -  Extract from stdin
 
   OPTIONS:
     --dry-run              Show extracted facts without storing to database
@@ -59,8 +59,8 @@ if (flags.help || args.length === 0) {
     --help                 Show this help message
 
   EXAMPLES:
-    npx persyst-mcp extract "I prefer Postgres over SQLite"
-    npx persyst-mcp extract --dry-run --file ./conversation.log
+    npx scopekeep extract "I prefer Postgres over SQLite"
+    npx scopekeep extract --dry-run --file ./conversation.log
   `);
   process.exit(0);
 }

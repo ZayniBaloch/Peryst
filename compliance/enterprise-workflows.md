@@ -1,6 +1,8 @@
-# Persyst Enterprise Integration & Developer Workflows
+# Historical Enterprise Integration & Developer Workflow Draft
 
-This document outlines the target user profiles, core deployment patterns, and operational workflows for enterprise teams running Persyst in regulated environments (HIPAA, SOC 2, EU AI Act).
+> **Status:** Product-design examples only. They are not compliance procedures, certifications, or proof that a customer's controls operate effectively.
+
+This document outlines the target user profiles, core deployment patterns, and operational workflows for enterprise teams running ScopeKeep in regulated environments (HIPAA, SOC 2, EU AI Act).
 
 ---
 
@@ -9,17 +11,17 @@ This document outlines the target user profiles, core deployment patterns, and o
 ### A. The Regulated Software Engineer
 * **Profile**: Developers writing software in healthcare (PHI), finance (PCI), defense, or government sectors.
 * **Problem**: They want to use AI coding assistants (Cursor, Claude Code, Aider, Continue.dev) to boost productivity, but corporate security policies strictly forbid sending workspace context or developer interaction logs to cloud-based memory services.
-* **Persyst Solution**: Persyst runs completely offline. The vector database (SQLite) and embedding model (ONNX Runtime) execute locally within the workstation boundary, ensuring zero data egress.
+* **ScopeKeep Solution**: The vector database and embedding model execute locally within the workstation boundary. The surrounding MCP client and model-provider data flow still require a separate security review.
 
 ### B. The Security & Compliance Officer
 * **Profile**: Compliance managers responsible for verifying that AI usage aligns with SOC 2 CC8.1 (Auditing) or HIPAA § 164.312 (Audit Controls).
 * **Problem**: AI code generation is a black box. Compliance teams need proof of what information was retrieved, when it was injected, and whether the data boundary was breached.
-* **Persyst Solution**: Cryptographic signature chaining. Every context injection and memory retrieval is signed using local Ed25519 keys, producing a tamper-evident audit ledger that can be verified and exported.
+* **ScopeKeep Solution**: Cryptographic signature chaining. Every context injection and memory retrieval is signed using local Ed25519 keys, producing a tamper-evident audit ledger that can be verified and exported.
 
 ### C. The Swarm & Multi-Agent Architect
 * **Profile**: Architects building autonomous developer agents or multi-agent swarms.
 * **Problem**: Swarms need a way to share common project specifications (coding rules, API styles) while isolating private, temporary agent states to avoid context pollution.
-* **Persyst Solution**: Namespace separation. Agents share global memories (`namespace = 'shared'`) but maintain private memory buffers using unique `agent_id` parameters.
+* **ScopeKeep Solution**: Namespace separation. Agents share global memories (`namespace = 'shared'`) but maintain private memory buffers using unique `agent_id` parameters.
 
 ---
 
@@ -36,7 +38,7 @@ This is the default configuration for individual developer workstations.
 |              |                                              |
 |         (STDIO MCP)                                         |
 |              v                                              |
-|      [persyst-mcp daemon]                                   |
+|      [scopekeep daemon]                                   |
 |              |                                              |
 |       (Local SQLite)                                        |
 |              v                                              |
@@ -45,7 +47,7 @@ This is the default configuration for individual developer workstations.
 +-------------------------------------------------------------+
 ```
 
-* **Command**: Run `npx persyst-mcp init` to generate `.cursorrules` or `.persystrules.md`.
+* **Command**: Run `npx scopekeep init` to generate `.cursorrules` or `.persystrules.md`.
 * **Execution**: The IDE agent calls the MCP server on stdio.
 * **Effect**: Facts are recorded automatically as the developer writes code, maintaining context across projects and branches.
 
@@ -67,11 +69,11 @@ This workflow is used by security teams to verify development integrity before m
                                     (Generate Compliance Artifact)
 ```
 
-1. **Continuous Retrieval Logging**: As developers work, Persyst writes signed attestations to the local database.
+1. **Continuous Retrieval Logging**: As developers work, ScopeKeep writes signed attestations to the local database.
 2. **Commit Verification**: Before pushing code, a pre-commit or CI/CD script runs the verification check:
    ```bash
    # Verify the integrity of the attestation ledger
-   npx persyst-mcp verify_attestation --id <latest-id>
+   npx scopekeep verify_attestation --id <latest-id>
    ```
 3. **Audit Export**: At the end of a sprint or release cycle, the team exports the cryptographic log via HTTP or the CLI:
    ```bash
@@ -106,6 +108,6 @@ For teams using orchestrators (e.g. CrewAI, AutoGen) or multi-agent CLI workspac
 
 ## 3. Best Practices for Compliance Management
 
-* **Attestation Key Rotation**: Keys are stored at `~/.persyst/keys/`. Regulated teams should back up these keys securely. To rotate keys, simply backup and remove the keys folder; Persyst will automatically generate a new Ed25519 pair on the next run.
-* **Secret Redaction Audits**: While Persyst automatically redacts known API keys and credentials, developers should periodically check `/stats` to verify that no plain-text credentials have been stored.
+* **Attestation Key Rotation**: Keys are stored at `~/.persyst/keys/`. Regulated teams should back up these keys securely. To rotate keys, simply backup and remove the keys folder; ScopeKeep will automatically generate a new Ed25519 pair on the next run.
+* **Secret Redaction Audits**: While ScopeKeep automatically redacts known API keys and credentials, developers should periodically check `/stats` to verify that no plain-text credentials have been stored.
 * **Periodic Consolidation**: Configure your agents to call `consolidate_memories` weekly to merge redundant memories, keeping retrieval speeds sub-5ms.

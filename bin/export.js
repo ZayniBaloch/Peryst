@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * export.js — Persyst Memory JSONL Export CLI
+ * export.js — ScopeKeep Memory JSONL Export CLI
  *
  * Exports all active memories to a portable JSONL file for backup or migration.
  * Each line is a JSON object representing one memory with its full metadata.

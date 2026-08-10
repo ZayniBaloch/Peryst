@@ -1,22 +1,8 @@
-/**
- * embeddings.js — Local Embedding Generation
- * 
- * Uses @huggingface/transformers with the all-MiniLM-L6-v2 model
- * to generate 384-dimensional embeddings entirely on your machine.
- * 
- * - No API keys needed
- * - No cloud calls
- * - Model downloads once (~50MB), then cached locally
- * - Returns Float32Array ready for sqlite-vec
- */
-
 import './setup-wasm.js';
 import { env, pipeline } from '@huggingface/transformers';
 
-// Disable WASM caching to prevent blob: URL ESM dynamic import error in Node.js
 env.useWasmCache = false;
 
-// The embedding pipeline (lazy-loaded on first use)
 let extractor = null;
 let useFallbackEmbeddings = false;
 let modelLoadAttempted = false;
@@ -31,22 +17,20 @@ const SYNONYM_MAP = new Map([
 
 import { logInfo } from './text-utils.js';
 
-/**
- * Load the embedding model. Called automatically on first use.
- * First run downloads the model (~50MB). Subsequent runs use cache.
- */
+export const EMBED_DIM = 384;
+
 async function loadModel() {
   if (extractor || useFallbackEmbeddings || modelLoadAttempted) return;
   modelLoadAttempted = true;
 
-  logInfo('[persyst] Loading embedding model (first run downloads ~50MB)...');
+  logInfo('[scopekeep] Loading embedding model (first run downloads ~50MB)...');
   try {
     extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-    logInfo('[persyst] Embedding model loaded ✓');
+    logInfo('[scopekeep] Embedding model loaded ✓');
   } catch (error) {
     useFallbackEmbeddings = true;
     const message = error instanceof Error ? error.message : String(error);
-    logInfo(`[persyst] Embedding model unavailable, using deterministic fallback embeddings (${message})`);
+    logInfo(`[scopekeep] Embedding model unavailable, using deterministic fallback embeddings (${message})`);
   }
 }
 
@@ -96,17 +80,6 @@ function generateFallbackEmbedding(text) {
   return vec;
 }
 
-/**
- * Generate a 384-dimensional embedding for the given text.
- * 
- * @param {string} text - The text to embed
- * @returns {Promise<Float32Array>} - Normalized 384-dim embedding vector
- * 
- * @example
- *   const vec = await generateEmbedding("User prefers dark mode");
- *   // vec is a Float32Array with 384 values
- *   // Use vec.buffer to insert into sqlite-vec
- */
 export async function generateEmbedding(text) {
   await loadModel();
 
@@ -125,7 +98,7 @@ export async function generateEmbedding(text) {
   } catch (error) {
     useFallbackEmbeddings = true;
     const message = error instanceof Error ? error.message : String(error);
-    logInfo(`[persyst] Embedding inference failed, using deterministic fallback embeddings (${message})`);
+    logInfo(`[scopekeep] Embedding inference failed, using deterministic fallback embeddings (${message})`);
     return generateFallbackEmbedding(text);
   }
 }

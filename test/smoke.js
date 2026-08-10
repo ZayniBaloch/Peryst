@@ -1,5 +1,5 @@
 /**
- * smoke.js — Persyst Smoke Test
+ * smoke.js — ScopeKeep Smoke Test
  * 
  * Quick test to verify everything works end-to-end:
  *   1. Insert 10 sample memories (with embeddings)
@@ -57,7 +57,7 @@ function assert(condition, label) {
 }
 
 async function runTests() {
-  console.log('\n[TEST] Persyst Smoke Test\n');
+  console.log('\n[TEST] ScopeKeep Smoke Test\n');
 
   // ----------------------------------------------------------
   // Test 1: Insert memories

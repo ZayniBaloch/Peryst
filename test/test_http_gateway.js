@@ -1,7 +1,7 @@
 /**
- * test_http_gateway.js — Persyst HTTP Gateway Integration & Latency Test
+ * test_http_gateway.js — ScopeKeep HTTP Gateway Integration & Latency Test
  * 
- * Runs the Persyst gateway in a subprocess, executes HTTP requests,
+ * Runs the ScopeKeep gateway in a subprocess, executes HTTP requests,
  * and asserts correctness, contradiction handling, and sub-15ms latency.
  * 
  * Run: node test/test_http_gateway.js
@@ -96,14 +96,25 @@ function makeGetRequest(path) {
 }
 
 async function runTests() {
-  console.log('\n🧪 Persyst HTTP Gateway Integration Test\n');
+  console.log('\n🧪 ScopeKeep HTTP Gateway Integration Test\n');
 
-  // 1. Spawn Persyst server
-  console.log('🚀 Spawning Persyst MCP & HTTP server...');
+  // 1. Spawn ScopeKeep server
+  console.log('🚀 Spawning ScopeKeep MCP & HTTP server...');
   const serverProcess = spawn('node', [resolve(projectRoot, 'index.js')], {
     cwd: projectRoot,
-    env: { ...process.env, PORT: TEST_PORT, NODE_ENV: 'test' },
-    stdio: ['pipe', 'ignore', 'pipe'] // pipe stderr to check for errors/listening messages
+    env: {
+      ...process.env,
+      PORT: TEST_PORT,
+      NODE_ENV: 'test',
+      PERSYST_HTTP_ENABLED: '1',
+      PERSYST_ENABLE_GENERIC_TOOL: '1'
+    },
+    stdio: 'pipe'
+  });
+
+  serverProcess.stdout.on('data', (data) => {
+    // Suppress verbose output in logs unless needed, but we can print it
+    console.log(`[Server Stdout] ${data.toString().trim()}`);
   });
 
   serverProcess.stderr.on('data', (data) => {
@@ -118,36 +129,24 @@ async function runTests() {
     console.log(`[Server Process Exited] code=${code} signal=${signal}`);
   });
 
-  // Dynamically wait for the server to start listening
-  await new Promise((resolve, reject) => {
-    let started = false;
-    const timeout = setTimeout(() => {
-      if (!started) {
-        reject(new Error('Timeout waiting for Persyst server to start listening'));
-      }
-    }, 10000); // 10s max timeout
-
-    serverProcess.stderr.on('data', (data) => {
-      const output = data.toString();
-      if (output.includes('HTTP Gateway listening') || output.includes('already in use')) {
+  // Poll the actual service identity instead of coupling readiness to log wording.
+  let started = false;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    try {
+      const health = await makeGetRequest('/health');
+      if (health.statusCode === 200 && health.body.service === 'scopekeep') {
         started = true;
-        clearTimeout(timeout);
-        resolve();
+        break;
       }
-    });
-
-    serverProcess.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-
-    serverProcess.on('exit', (code) => {
-      if (!started) {
-        clearTimeout(timeout);
-        reject(new Error(`Server exited prematurely with code ${code}`));
-      }
-    });
-  });
+    } catch (_) {
+      // The listener is not ready yet.
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (!started) {
+    serverProcess.kill('SIGTERM');
+    throw new Error('Timeout waiting for ScopeKeep HTTP gateway health identity');
+  }
 
   try {
     // 2. Test /add endpoint
@@ -221,13 +220,16 @@ async function runTests() {
     const complianceJson = await makeGetRequest('/compliance/export');
     assert(complianceJson.statusCode === 200, 'Compliance export JSON status is 200');
     assert(complianceJson.body.summary !== undefined, 'Response includes summary');
-    assert(complianceJson.body.summary.system_integrity === 'SECURE', 'System cryptographic status is SECURE');
+    assert(
+      ['VERIFIED', 'NO_RECORDS'].includes(complianceJson.body.summary.system_integrity),
+      'System cryptographic status is evidence-based'
+    );
     assert(Array.isArray(complianceJson.body.agent_stats), 'Response includes agent stats list');
 
     const complianceMd = await makeGetRequest('/compliance/export?format=markdown');
     assert(complianceMd.statusCode === 200, 'Compliance export Markdown status is 200');
-    assert(typeof complianceMd.body === 'string' && complianceMd.body.includes('# Persyst Cryptographic Compliance Export'), 'Response is valid Markdown');
-    assert(complianceMd.body.includes('System cryptographic status: **SECURE**'), 'Markdown includes correct security status');
+    assert(typeof complianceMd.body === 'string' && complianceMd.body.includes('# ScopeKeep Cryptographic Evidence Export'), 'Response is valid Markdown');
+    assert(/System cryptographic status: \*\*(VERIFIED|NO_RECORDS)\*\*/.test(complianceMd.body), 'Markdown includes evidence-based integrity status');
 
     // Cleanup added memory
     console.log('\n🧹 Cleaning up test memory...');
@@ -240,7 +242,7 @@ async function runTests() {
     console.error('💥 Test error:', err);
     failed++;
   } finally {
-    console.log('\n🛑 Stopping Persyst server...');
+    console.log('\n🛑 Stopping ScopeKeep server...');
     serverProcess.kill('SIGTERM');
     
     // Wait briefly for process cleanup

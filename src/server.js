@@ -19,6 +19,11 @@
  */
 
 import http from 'http';
+import crypto from 'crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { createRequire } from 'module';
 import { URL } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -38,6 +43,43 @@ import { startWatcher, stopWatcher } from './watcher.js';
 import { verifyChainIntegrity } from './attestation.js';
 import { memoryEventBus } from './events.js';
 import { logInfo } from './text-utils.js';
+
+const require = createRequire(import.meta.url);
+const { version: SERVER_VERSION } = require('../package.json');
+const SERVICE_ID = 'scopekeep';
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+function getGatewayToken(configuredToken) {
+  if (configuredToken) return configuredToken;
+
+  const configDir = join(homedir(), '.persyst');
+  const tokenPath = process.env.PERSYST_TOKEN_FILE || join(configDir, 'gateway-token');
+  mkdirSync(configDir, { recursive: true });
+
+  if (existsSync(tokenPath)) {
+    const existing = readFileSync(tokenPath, 'utf8').trim();
+    if (existing.length >= 32) return existing;
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  writeFileSync(tokenPath, `${generated}\n`, { encoding: 'utf8', mode: 0o600 });
+  try { chmodSync(tokenPath, 0o600); } catch (_) { /* Windows ACLs are managed by the OS. */ }
+  return generated;
+}
+
+function tokenMatches(actual, expected) {
+  if (!actual || !expected) return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function getAllowedOrigins() {
+  return new Set((process.env.PERSYST_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean));
+}
 
 // Track server birth time for uptime reporting
 const SERVER_START_TIME = Date.now();
@@ -86,7 +128,7 @@ function formatSystemPrompt(contextData, format, agentId) {
   }
 
   if (format === 'markdown') {
-    let md = `# Persyst Memory Context\n`;
+    let md = `# ScopeKeep Memory Context\n`;
     md += `> ${count} memories | Updated: ${now}`;
     if (agentId) md += ` | Agent: \`${agentId}\``;
     md += '\n\n';
@@ -145,11 +187,12 @@ async function handleGetRequest(req, res, url) {
   if (path === '/health') {
     const uptime = Math.floor((Date.now() - SERVER_START_TIME) / 1000);
     let memories = 0;
-    try { memories = getActiveMemoryCount(); } catch (_) {}
+    try { memories = getActiveMemoryCount(); } catch (e) { logInfo(`[scopekeep-server] Memory count check error: ${e.message}`); }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ok: true,
-      version: '2.2.6',
+      service: SERVICE_ID,
+      version: SERVER_VERSION,
       uptime_seconds: uptime,
       memories,
       sse_clients: sseClients.size
@@ -215,11 +258,13 @@ async function handleGetRequest(req, res, url) {
         start_date: startDate,
         end_date: endDate,
         total_attestations: attestations.length,
-        system_integrity: 'SECURE'
+        system_integrity: attestations.length === 0
+          ? 'NO_RECORDS'
+          : (verifyChainIntegrity(attestations[attestations.length - 1].attestation_id).valid ? 'VERIFIED' : 'FAILED')
       };
 
       if (format === 'markdown') {
-        let md = `# Persyst Cryptographic Compliance Export\n\n`;
+        let md = `# ScopeKeep Cryptographic Evidence Export\n\n`;
         md += `Exported at: \`${summary.exported_at}\`  \n`;
         md += `Period: \`${summary.start_date}\` to \`${summary.end_date}\`  \n`;
         md += `Total audit records: **${summary.total_attestations}**  \n`;
@@ -249,7 +294,9 @@ async function handleGetRequest(req, res, url) {
             let retrieved = [];
             try {
               retrieved = JSON.parse(att.memories_retrieved);
-            } catch (_) {}
+            } catch (err) {
+              logInfo(`[scopekeep-server] Health metrics check failed: ${err.message}`);
+            }
 
             if (retrieved.length > 0) {
               md += `- **Memories retrieved:**\n`;
@@ -344,7 +391,6 @@ async function handleGetRequest(req, res, url) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
       'X-Accel-Buffering': 'no'  // Prevents nginx from buffering SSE
     });
 
@@ -352,7 +398,7 @@ async function handleGetRequest(req, res, url) {
     res.write(`event: connected\ndata: ${JSON.stringify({
       ok: true,
       timestamp: new Date().toISOString(),
-      server_version: '2.2.7'
+      server_version: SERVER_VERSION
     })}\n\n`);
 
     sseClients.add(res);
@@ -363,19 +409,19 @@ async function handleGetRequest(req, res, url) {
     }, 15000);
 
     const onAdded = (data) => {
-      try { res.write(`event: memory_added\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+      try { res.write(`event: memory_added\ndata: ${JSON.stringify(data)}\n\n`); } catch (err) { sseClients.delete(res); }
     };
     const onDeleted = (data) => {
-      try { res.write(`event: memory_deleted\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+      try { res.write(`event: memory_deleted\ndata: ${JSON.stringify(data)}\n\n`); } catch (err) { sseClients.delete(res); }
     };
     const onUpdated = (data) => {
-      try { res.write(`event: memory_updated\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+      try { res.write(`event: memory_updated\ndata: ${JSON.stringify(data)}\n\n`); } catch (err) { sseClients.delete(res); }
     };
     const onRetrieved = (data) => {
-      try { res.write(`event: memory_retrieved\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+      try { res.write(`event: memory_retrieved\ndata: ${JSON.stringify(data)}\n\n`); } catch (err) { sseClients.delete(res); }
     };
     const onConsolidated = (data) => {
-      try { res.write(`event: memories_consolidated\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+      try { res.write(`event: memories_consolidated\ndata: ${JSON.stringify(data)}\n\n`); } catch (err) { sseClients.delete(res); }
     };
 
     memoryEventBus.on('memory_added', onAdded);
@@ -392,10 +438,10 @@ async function handleGetRequest(req, res, url) {
       memoryEventBus.off('memory_retrieved', onRetrieved);
       memoryEventBus.off('memories_consolidated', onConsolidated);
       sseClients.delete(res);
-      console.error(`[persyst-sse] Client disconnected. Active: ${sseClients.size}`);
+      console.error(`[scopekeep-sse] Client disconnected. Active: ${sseClients.size}`);
     });
 
-    console.error(`[persyst-sse] Client connected. Active: ${sseClients.size}`);
+    console.error(`[scopekeep-sse] Client connected. Active: ${sseClients.size}`);
     return; // Keep connection alive — do NOT end response
   }
 
@@ -447,9 +493,9 @@ async function handlePostRequest(req, res, payload) {
     const result = await addMemoryInternal({
       content: normalizedContent,
       importance,
-      agent_id: payload.agent_id || null,
-      session_id: payload.session_id || null,
-      shared: payload.shared !== false
+      agent_id: typeof payload === 'object' ? payload.agent_id || null : null,
+      session_id: typeof payload === 'object' ? payload.session_id || null : null,
+      shared: typeof payload === 'object' ? payload.shared !== false : true
     });
 
     if (!result.error) {
@@ -551,6 +597,11 @@ async function handlePostRequest(req, res, payload) {
   // POST /tool — generic MCP tool invocation
   // ----------------------------------------------------------
   if (path === '/tool') {
+    if (process.env.PERSYST_ENABLE_GENERIC_TOOL !== '1') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Generic tool execution is disabled. Use an explicit endpoint or MCP transport.' }));
+      return;
+    }
     const { name, arguments: args } = payload;
     if (!name) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -707,24 +758,24 @@ async function handlePostRequest(req, res, payload) {
 export async function startServer() {
   // --- Create MCP server ---
   const server = new McpServer({
-    name: 'persyst',
-    version: '2.2.5'
+    name: 'scopekeep',
+    version: SERVER_VERSION
   });
 
   // --- Register all tools ---
   const registeredCount = registerTools(server);
-  logInfo(`[persyst] ${registeredCount} tools registered ✓`);
+  logInfo(`[scopekeep] ${registeredCount} tools registered ✓`);
 
   // --- Connect via stdio IMMEDIATELY so MCP handshake completes instantly (<10ms) ---
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  logInfo('[persyst] MCP server running on stdio ✓');
-  logInfo('[persyst] Ready to receive tool calls');
+  logInfo('[scopekeep] MCP server running on stdio ✓');
+  logInfo('[scopekeep] Ready to receive tool calls');
 
   // Interactive Terminal Banner (only shown when run directly by a user in terminal)
   if (process.stderr.isTTY || process.stdout.isTTY) {
-    console.error(`\n[OK] Persyst MCP Server is active and listening (stdio mode)`);
+    console.error(`\n[OK] ScopeKeep MCP Server is active and listening (stdio mode)`);
     console.error(`[OK] Workspace Project: ${process.env.PERSYST_PROJECT || 'shared'}`);
     console.error(`[OK] Local HTTP Gateway: http://127.0.0.1:${process.env.PORT || '4321'}`);
     console.error(`[OK] Process ID: ${process.pid} | Press Ctrl+C to stop.\n`);
@@ -735,9 +786,10 @@ export async function startServer() {
   let decayTimer = null;
   let consolidationTimer = null;
   let sseHealthCheck = null;
+  let ownsGateway = false;
 
   const shutdown = () => {
-    logInfo('[persyst] Shutting down...');
+    logInfo('[scopekeep] Shutting down...');
     if (decayTimer) clearInterval(decayTimer);
     if (consolidationTimer) clearInterval(consolidationTimer);
     if (sseHealthCheck) clearInterval(sseHealthCheck);
@@ -748,7 +800,9 @@ export async function startServer() {
       try {
         client.write(`event: server_shutdown\ndata: ${JSON.stringify({ message: 'Server shutting down' })}\n\n`);
         client.end();
-      } catch (_) {}
+      } catch (err) {
+        logInfo(`[scopekeep-server] Batch processing item error: ${err.message}`);
+      }
     }
     sseClients.clear();
 
@@ -758,33 +812,73 @@ export async function startServer() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  setTimeout(() => {
-    // --- Start background log watcher daemon (skip in test mode) ---
-    if (process.env.NODE_ENV !== 'test') {
-      startWatcher();
+  setTimeout(async () => {
+    const gatewayEnabled = process.env.PERSYST_HTTP_ENABLED === '1' || process.env.NODE_ENV === 'test';
+    if (!gatewayEnabled) {
+      logInfo('[scopekeep] HTTP Gateway disabled. Set PERSYST_HTTP_ENABLED=1 to enable it.');
+      return;
+    }
+    // Re-indexing is an explicit maintenance operation, never an automatic side effect.
+    if (process.env.PERSYST_REINDEX_ON_START === '1') try {
+      const { getMemoriesMissingVectors, insertVector } = await import('./database.js');
+      const { generateEmbedding } = await import('./embeddings.js');
+      const missing = getMemoriesMissingVectors();
+      if (missing.length > 0) {
+        logInfo(`[scopekeep] Found ${missing.length} memories missing vector embeddings. Rebuilding index...`);
+        for (const m of missing) {
+          try {
+            const embedding = await generateEmbedding(m.content);
+            insertVector(m.id, embedding);
+          } catch (err) {
+            console.error(`[scopekeep] Failed to generate embedding for memory #${m.id}: ${err.message}`);
+          }
+        }
+        logInfo(`[scopekeep] Rebuilt vector embeddings for ${missing.length} memories.`);
+      }
+    } catch (err) {
+      console.error(`[scopekeep] Error during vector re-indexing: ${err.message}`);
     }
 
     // --- Gateway configuration ---
     const httpPort = parseInt(process.env.PORT || '4321', 10);
     const httpHost = process.env.PERSYST_HOST || '127.0.0.1';
-    const configuredApiKey = process.env.PERSYST_API_KEY || null;
+    const authDisabledForTests = process.env.NODE_ENV === 'test' && process.env.PERSYST_HTTP_AUTH !== 'enabled';
+    const configuredApiKey = authDisabledForTests ? null : getGatewayToken(process.env.PERSYST_API_KEY || null);
+    const allowedOrigins = getAllowedOrigins();
+    const maxBodyBytes = Math.max(1024, Number(process.env.PERSYST_MAX_BODY_BYTES) || DEFAULT_MAX_BODY_BYTES);
 
     if (configuredApiKey) {
-      logInfo(`[persyst] API key auth enabled — endpoints require Authorization: Bearer <key>`);
+      logInfo(`[scopekeep] API key auth enabled — endpoints require Authorization: Bearer <key>`);
     }
     if (httpHost !== '127.0.0.1') {
-      logInfo(`[persyst] ⚠️  Gateway bound to ${httpHost} — ensure PERSYST_API_KEY is set for security`);
+      logInfo(`[scopekeep] ⚠️  Gateway bound to ${httpHost} — ensure PERSYST_API_KEY is set for security`);
+    }
+
+    if (httpHost !== '127.0.0.1' && httpHost !== '::1' && !process.env.PERSYST_API_KEY) {
+      console.error('[scopekeep] Refusing non-loopback binding without an explicit PERSYST_API_KEY.');
+      return;
     }
 
     // --- Start local HTTP Gateway ---
     httpServer = http.createServer((req, res) => {
-      // CORS headers
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'no-store');
+
+      const requestOrigin = req.headers.origin;
+      if (requestOrigin) {
+        if (!allowedOrigins.has(requestOrigin)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Origin is not allowed.' }));
+          return;
+        }
+        res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      }
 
       if (req.method === 'OPTIONS') {
-        res.writeHead(204);
+        res.writeHead(requestOrigin ? 204 : 403);
         res.end();
         return;
       }
@@ -794,7 +888,7 @@ export async function startServer() {
         if (urlPath !== '/health') {
           const authHeader = req.headers['authorization'] || '';
           const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-          if (token !== configuredApiKey) {
+          if (!tokenMatches(token, configuredApiKey)) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               error: 'Unauthorized. Set header: Authorization: Bearer <PERSYST_API_KEY>'
@@ -808,23 +902,28 @@ export async function startServer() {
       const path = url.pathname;
 
       if (req.method === 'GET') {
-        handleGetRequest(req, res, path, url);
+        handleGetRequest(req, res, url);
         return;
       }
 
       if (req.method === 'POST') {
         let body = '';
+        let bodyTooLarge = false;
         req.on('data', chunk => {
+          if (bodyTooLarge) return;
           body += chunk;
-          if (body.length > 10 * 1024 * 1024) {
+          if (Buffer.byteLength(body) > maxBodyBytes) {
+            bodyTooLarge = true;
             res.writeHead(413, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Payload too large. Max 10MB.' }));
+            res.end(JSON.stringify({ error: `Payload too large. Max ${maxBodyBytes} bytes.` }));
             req.destroy();
           }
         });
         req.on('end', () => {
+          if (bodyTooLarge) return;
           try {
-            const payload = body ? JSON.parse(body) : {};
+            const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+            const payload = contentType === 'text/plain' ? body : (body ? JSON.parse(body) : {});
             handlePostRequest(req, res, payload).catch(err => {
               try {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -845,23 +944,30 @@ export async function startServer() {
 
     httpServer.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        logInfo(`[persyst] HTTP Gateway port ${httpPort} already in use. Stdio MCP server will continue.`);
+        ownsGateway = false;
+        httpServer = null;
+        logInfo(`[scopekeep] HTTP Gateway port ${httpPort} is already owned. This process remains a thin stdio adapter.`);
       } else {
-        console.error('[persyst] HTTP Gateway error:', err.message);
+        console.error('[scopekeep] HTTP Gateway error:', err.message);
       }
     });
 
     httpServer.listen(httpPort, httpHost, () => {
-      logInfo(`[persyst] HTTP Gateway listening on http://${httpHost}:${httpPort} ✓`);
+      ownsGateway = true;
+      if (process.env.PERSYST_CAPTURE_ENABLED === '1') startWatcher();
+      logInfo(`[scopekeep] HTTP Gateway listening on http://${httpHost}:${httpPort} ✓`);
     });
 
-    decayTimer = setInterval(applyTemporalDecay, 3600000);
+    decayTimer = setInterval(() => {
+      if (ownsGateway) applyTemporalDecay();
+    }, 3600000);
 
     consolidationTimer = setInterval(async () => {
-      logInfo('[persyst] Running scheduled daily memory consolidation sweep...');
+      if (!ownsGateway || process.env.PERSYST_AUTO_CONSOLIDATE !== '1') return;
+      logInfo('[scopekeep] Running scheduled daily memory consolidation sweep...');
       try {
-        const report = await consolidateMemories();
-        logInfo(`[persyst] Consolidation sweep: consolidated ${report.consolidated_groups} duplicate groups.`);
+        const report = await consolidateMemories(process.env.PERSYST_PROJECT || 'shared');
+        logInfo(`[scopekeep] Consolidation sweep: consolidated ${report.consolidated_groups} duplicate groups.`);
         if (report.consolidated_groups > 0) {
           memoryEventBus.emit('memories_consolidated', {
             consolidated_groups: report.consolidated_groups,
@@ -869,16 +975,17 @@ export async function startServer() {
           });
         }
       } catch (err) {
-        console.error('[persyst] Daily consolidation sweep failed:', err.message);
+        console.error('[scopekeep] Daily consolidation sweep failed:', err.message);
       }
     }, 86400000);
 
     sseHealthCheck = setInterval(() => {
+      if (!ownsGateway) return;
       for (const client of sseClients) {
         try {
           client.write(': health-check\n\n');
         } catch (_) {
-          try { client.end(); } catch (_) {}
+          try { client.end(); } catch (err) { /* SSE client disconnected */ }
           sseClients.delete(client);
         }
       }

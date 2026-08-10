@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+process.env.NODE_ENV = 'test';
 /**
  * production_stress_suite.js — Real-World Production Stress Test Suite
  * 
@@ -16,6 +17,7 @@ import db, {
   searchKeyword,
   searchVector,
   stmts,
+  WORKSPACE_ID,
   closeDatabase
 } from '../src/database.js';
 import { searchHybrid, getOptimizedContext } from '../src/search.js';
@@ -75,7 +77,7 @@ async function runProductionStressSuite() {
   insertVector(v2, await generateEmbedding('Architecture Decision: Upgrade frontend to React 18 with concurrent features.'));
   
   // Mark contradiction explicitly in ledger and archive superseded memory
-  stmts.archiveMemory.run(v1);
+  stmts.archiveMemory.run(v1, WORKSPACE_ID);
   stmts.insertContradiction.run(v1, v2, 'Frontend framework version upgraded to React 18.');
 
   const contradictionResults = await searchHybrid('React frontend framework version', 5, 'dev-2', 'session-2', 'proj-alpha');

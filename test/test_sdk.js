@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
-import { Persyst } from '../src/sdk.js';
+import { ScopeKeep } from '../src/sdk.js';
 import db, { closeDatabase } from '../src/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,11 +45,11 @@ test.after(() => {
   closeDatabase();
 });
 
-test('Persyst Developer SDK & Context Upgrades', async (t) => {
+test('ScopeKeep Developer SDK & Context Upgrades', async (t) => {
   
   await t.test('1. Library Mode (Offline Direct SQLite Access)', async () => {
     // Force library mode explicitly to run offline
-    const sdk = new Persyst({ mode: 'library' });
+    const sdk = new ScopeKeep({ mode: 'library' });
     
     // Test track event
     const trackRes = await sdk.track({
@@ -84,7 +84,7 @@ test('Persyst Developer SDK & Context Upgrades', async (t) => {
   });
 
   await t.test('2. Urgency and Intent Classification Heuristics', async () => {
-    const sdk = new Persyst({ mode: 'library' });
+    const sdk = new ScopeKeep({ mode: 'library' });
 
     // Test critical urgency & database intent
     const contextDb = await sdk.context({
@@ -122,7 +122,7 @@ test('Persyst Developer SDK & Context Upgrades', async (t) => {
       await waitForGateway(TEST_PORT);
 
       // Force gateway mode or let it autodetect (will autodetect gateway since port 4321 is now active)
-      const sdk = new Persyst({ mode: 'gateway', port: TEST_PORT });
+      const sdk = new ScopeKeep({ mode: 'gateway', port: TEST_PORT });
 
       // Track a deployment event
       const trackRes = await sdk.track({

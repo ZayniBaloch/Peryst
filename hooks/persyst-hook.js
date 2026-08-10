@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * persyst-hook.js — Claude Code Hook for Persyst Memory (PAMP-Enhanced)
+ * persyst-hook.js — Claude Code Hook for ScopeKeep Memory (PAMP-Enhanced)
  * 
  * Automatically injects relevant memories into Claude Code's context
  * on SessionStart and UserPromptSubmit events, and queues conversation
  * turns for async background extraction on Stop events.
  * 
- * PAMP Integration (Persyst Auto-Memory Pipeline):
+ * PAMP Integration (ScopeKeep Auto-Memory Pipeline):
  *   - Tier 1: Agent-explicit add_memory calls (existing, unchanged)
  *   - Tier 2: Heuristic regex extraction on UserPromptSubmit (sync, zero-cost)
  *   - Tier 3: Async LLM extraction via background worker (spawned on Stop)
  * 
  * How it works:
  *   1. Claude Code sends a JSON payload on stdin with hook_event_name, session_id, etc.
- *   2. This script connects to the Persyst MCP server via StdioClientTransport.
+ *   2. This script connects to the ScopeKeep MCP server via StdioClientTransport.
  *   3. It calls get_optimized_context or search_memories to retrieve relevant memories.
  *   4. It returns a JSON response on stdout with additionalContext for Claude Code to inject.
  *   5. On Stop: queues the conversation text for background LLM extraction.
  * 
  * Installation:
- *   npx persyst-mcp setup
+ *   npx scopekeep setup
  * 
  * Manual registration in ~/.claude/settings.json:
  *   { "hooks": { "SessionStart": [...], "UserPromptSubmit": [...], "Stop": [...] } }
@@ -45,7 +45,7 @@ const __dirname = dirname(__filename);
 // Minimum prompt length to trigger memory search (skip "y", "ok", "/run", etc.)
 const MIN_PROMPT_LENGTH = 15;
 
-// Maximum time to wait for Persyst MCP connection (ms)
+// Maximum time to wait for ScopeKeep MCP connection (ms)
 const CONNECTION_TIMEOUT = 8000;
 
 // Hard timeout for the entire hook execution (ms)
@@ -91,7 +91,7 @@ let stdioClient = null;
 
 async function getStdioClient() {
   if (stdioClient) return stdioClient;
-  stdioClient = await connectToPersyst();
+  stdioClient = await connectToScopeKeep();
   return stdioClient;
 }
 
@@ -140,11 +140,11 @@ function callToolViaHttp(toolName, args, timeoutMs = 150) {
 }
 
 /**
- * Connect to the Persyst MCP server as a client.
+ * Connect to the ScopeKeep MCP server as a client.
  * Uses StdioClientTransport to spawn and communicate with the server.
  */
-async function connectToPersyst() {
-  // Resolve the path to Persyst's index.js
+async function connectToScopeKeep() {
+  // Resolve the path to ScopeKeep's index.js
   let persystPath = '{{PERSYST_INDEX_PATH}}';
   if (persystPath.startsWith('{{')) {
     persystPath = resolve(__dirname, '..', 'index.js');
@@ -156,7 +156,7 @@ async function connectToPersyst() {
   });
 
   const client = new Client({
-    name: 'persyst-hook',
+    name: 'scopekeep-hook',
     version: '1.0.0'
   });
 
@@ -164,7 +164,7 @@ async function connectToPersyst() {
   await Promise.race([
     client.connect(transport),
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Persyst connection timeout')), CONNECTION_TIMEOUT)
+      setTimeout(() => reject(new Error('ScopeKeep connection timeout')), CONNECTION_TIMEOUT)
     )
   ]);
 
@@ -172,7 +172,7 @@ async function connectToPersyst() {
 }
 
 /**
- * Call a Persyst MCP tool and parse the JSON result.
+ * Call a ScopeKeep MCP tool and parse the JSON result.
  */
 async function callTool(client, toolName, args) {
   if (isHttpAvailable) {
@@ -183,7 +183,7 @@ async function callTool(client, toolName, args) {
       }
     } catch (err) {
       isHttpAvailable = false;
-      process.stderr.write(`[persyst-hook] HTTP Gateway call failed (${err.message}). Falling back to stdio client.\n`);
+      process.stderr.write(`[scopekeep-hook] HTTP Gateway call failed (${err.message}). Falling back to stdio client.\n`);
     }
   }
 
@@ -238,7 +238,7 @@ function enqueueJob(text, meta = {}) {
     return jobId;
   } catch (err) {
     // Non-critical — log and continue
-    process.stderr.write(`[persyst-hook] Queue write failed: ${err.message}\n`);
+    process.stderr.write(`[scopekeep-hook] Queue write failed: ${err.message}\n`);
     return null;
   }
 }
@@ -251,7 +251,7 @@ function spawnWorker() {
   // Check queue depth first
   const queueDepth = countQueueJobs();
   if (queueDepth > MAX_QUEUE_JOBS) {
-    process.stderr.write(`[persyst-hook] Queue overloaded (${queueDepth} jobs), skipping worker spawn.\n`);
+    process.stderr.write(`[scopekeep-hook] Queue overloaded (${queueDepth} jobs), skipping worker spawn.\n`);
     return;
   }
 
@@ -270,7 +270,7 @@ function spawnWorker() {
     // Unref so the hook can exit without waiting for the worker
     child.unref();
   } catch (err) {
-    process.stderr.write(`[persyst-hook] Worker spawn failed: ${err.message}\n`);
+    process.stderr.write(`[scopekeep-hook] Worker spawn failed: ${err.message}\n`);
   }
 }
 
@@ -323,7 +323,7 @@ async function handleSessionStart(input) {
   }
 
   if (additionalContext) {
-    additionalContext = `[Persyst Memory: ${memoryCount} memories loaded for project "${repoName}"]\n${additionalContext}`;
+    additionalContext = `[ScopeKeep Memory: ${memoryCount} memories loaded for project "${repoName}"]\n${additionalContext}`;
   }
 
   return {
@@ -454,7 +454,7 @@ async function main() {
         handleUserPromptSubmit(input),
         new Promise((resolve) =>
           setTimeout(() => {
-            process.stderr.write(`[persyst-hook] UserPromptSubmit hit ${MAX_HOOK_LATENCY_MS}ms timeout, returning partial.\n`);
+            process.stderr.write(`[scopekeep-hook] UserPromptSubmit hit ${MAX_HOOK_LATENCY_MS}ms timeout, returning partial.\n`);
             resolve({});
           }, MAX_HOOK_LATENCY_MS - (Date.now() - hookStart))
         )
@@ -467,7 +467,7 @@ async function main() {
 
   } catch (err) {
     // Hooks must NEVER break Claude Code — always fail silently
-    console.error(`[persyst-hook] Error: ${err.message}`);
+    console.error(`[scopekeep-hook] Error: ${err.message}`);
     console.log(JSON.stringify({}));
   } finally {
     // Clean up MCP connection

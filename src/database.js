@@ -11,30 +11,180 @@
  * IMPORTANT: better-sqlite3 is SYNCHRONOUS. No async/await here.
  */
 
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import * as sqliteVec from 'sqlite-vec';
-import { join } from 'path';
+import { compressFact } from './summarizer.js';
+import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
-import { mkdirSync } from 'fs';
+import { chmodSync, mkdirSync, readFileSync, realpathSync, existsSync, statSync, writeFileSync } from 'fs';
+import { createHash, randomBytes } from 'crypto';
 
 import { logInfo } from './text-utils.js';
+import { EMBED_DIM } from './embeddings.js';
 
 // ============================================================
 // DATABASE LOCATION
-// Store in ~/.persyst/ per default to persist across sessions
+// Store in ~/.scopekeep/ per default to persist across sessions
 // ============================================================
 
-const DB_DIR = join(homedir(), '.persyst');
+const DB_DIR = join(homedir(), '.scopekeep');
 mkdirSync(DB_DIR, { recursive: true });
-const DB_PATH = process.env.NODE_ENV === 'test' ? ':memory:' : join(DB_DIR, 'persyst.db');
+
+function canonicalizeWorkspaceRoot(inputPath) {
+  const resolved = resolve(inputPath || process.cwd());
+  let canonical = resolved;
+  try { canonical = realpathSync.native(resolved); } catch (_) { /* The configured path may not exist yet. */ }
+  canonical = canonical.replace(/\\/g, '/').replace(/\/$/, '');
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+}
+
+export const WORKSPACE_ROOT = canonicalizeWorkspaceRoot(
+  process.env.SCOPEKEEP_WORKSPACE_ROOT || process.env.PERSYST_WORKSPACE_ROOT || process.env.PERSYST_PROJECT_ROOT || process.cwd()
+);
+export const WORKSPACE_ID = process.env.SCOPEKEEP_WORKSPACE_ID || process.env.PERSYST_WORKSPACE_ID ||
+  `ws_${createHash('sha256').update(WORKSPACE_ROOT).digest('hex').slice(0, 20)}`;
+
+export function getWorkspaceDatabasePath(workspaceId = WORKSPACE_ID) {
+  const wsDir = join(DB_DIR, 'workspaces', workspaceId);
+  mkdirSync(wsDir, { recursive: true });
+  return join(wsDir, 'scopekeep.db');
+}
+
+function accessNamespaces(namespace = null) {
+  if (namespace === 'all') {
+    throw new Error('The "all" namespace is disabled. Use an explicit workspace administration flow.');
+  }
+  const values = new Set(['shared']);
+  if (process.env.PERSYST_PROJECT) values.add(process.env.PERSYST_PROJECT.toLowerCase());
+  if (namespace) {
+    for (const value of String(namespace).split(',')) {
+      const normalized = value.trim().toLowerCase();
+      if (normalized && normalized !== 'all') values.add(normalized);
+    }
+  }
+  return Array.from(values);
+}
+
+function accessPair(namespace = null) {
+  const values = accessNamespaces(namespace).filter(value => value !== 'shared');
+  return [values[0] || 'shared', values[1] || values[0] || 'shared'];
+}
+const isTestEnv = process.env.NODE_ENV === 'test' || 
+                  process.argv.some(a => a.includes('test')) || 
+                  (process.mainModule && process.mainModule.filename && process.mainModule.filename.includes('test'));
+const forceEncryptedTestDatabase = process.env.SCOPEKEEP_FORCE_DB_ENCRYPTION === '1';
+
+function getActiveDatabasePath() {
+  if (isTestEnv && !forceEncryptedTestDatabase) return ':memory:';
+  if (process.env.SCOPEKEEP_DB) return process.env.SCOPEKEEP_DB;
+  if (process.env.PERSYST_DB) return process.env.PERSYST_DB;
+
+  // ScopeKeep 3 uses a physically separate database per canonical workspace.
+  // Legacy shared databases remain available only through explicit migration opt-in.
+  if (process.env.SCOPEKEEP_USE_LEGACY_DB !== '1') {
+    return getWorkspaceDatabasePath(WORKSPACE_ID);
+  }
+
+  const scopekeepPath = join(DB_DIR, 'scopekeep.db');
+  const legacyScopekeepPersystPath = join(DB_DIR, 'persyst.db');
+  const legacyPersystPath = join(homedir(), '.persyst', 'persyst.db');
+
+  if (existsSync(legacyPersystPath)) {
+    try {
+      const legacyStat = statSync(legacyPersystPath);
+      if (legacyStat.size > 0) {
+        if (!existsSync(scopekeepPath)) {
+          return legacyPersystPath;
+        }
+        const scopeStat = statSync(scopekeepPath);
+        if (legacyStat.size > scopeStat.size) {
+          return legacyPersystPath;
+        }
+      }
+    } catch (_) {}
+  }
+  if (existsSync(legacyScopekeepPersystPath)) {
+    return legacyScopekeepPersystPath;
+  }
+  return scopekeepPath;
+}
+
+export const ACTIVE_DATABASE_PATH = getActiveDatabasePath();
+const DB_PATH = ACTIVE_DATABASE_PATH;
+
+const DATABASE_ENCRYPTION_ENABLED = (!isTestEnv || forceEncryptedTestDatabase) &&
+  process.env.SCOPEKEEP_DISABLE_DB_ENCRYPTION !== '1' &&
+  DB_PATH !== ':memory:';
+
+function getDatabaseKey() {
+  if (!DATABASE_ENCRYPTION_ENABLED) return null;
+
+  const configured = process.env.SCOPEKEEP_DB_KEY;
+  if (configured) {
+    if (configured.length < 16) {
+      throw new Error('SCOPEKEEP_DB_KEY must contain at least 16 characters.');
+    }
+    return createHash('sha256').update(configured).digest('hex');
+  }
+
+  const keyPath = process.env.SCOPEKEEP_DB_KEY_FILE || join(dirname(DB_PATH), 'scopekeep.key');
+  if (!existsSync(keyPath)) {
+    mkdirSync(dirname(keyPath), { recursive: true });
+    writeFileSync(keyPath, `${randomBytes(32).toString('hex')}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+  }
+  try { chmodSync(keyPath, 0o600); } catch (_) { /* Windows ACLs remain controlled by the user profile. */ }
+  const material = readFileSync(keyPath, 'utf8').trim();
+  if (material.length < 32) {
+    throw new Error(`ScopeKeep database key file is invalid: ${keyPath}`);
+  }
+  return createHash('sha256').update(material).digest('hex');
+}
+
+function isPlaintextSqlite(path) {
+  if (!existsSync(path) || statSync(path).size < 16) return false;
+  const header = readFileSync(path).subarray(0, 16).toString('binary');
+  return header === 'SQLite format 3\u0000';
+}
+
+function openDatabase(path) {
+  const key = getDatabaseKey();
+  const plaintext = DATABASE_ENCRYPTION_ENABLED && isPlaintextSqlite(path);
+  let connection = new Database(path);
+
+  if (!key) return connection;
+
+  if (plaintext) {
+    try { connection.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
+    connection.pragma('journal_mode = DELETE');
+    connection.pragma(`rekey='${key}'`);
+    connection.close();
+    connection = new Database(path);
+    logInfo('[scopekeep] Existing workspace database encrypted at rest.');
+  }
+
+  connection.pragma(`key='${key}'`);
+  connection.prepare('SELECT count(*) AS count FROM sqlite_master').get();
+  return connection;
+}
+
+export const DATABASE_ENCRYPTION_STATUS = Object.freeze({
+  enabled: DATABASE_ENCRYPTION_ENABLED,
+  key_source: process.env.SCOPEKEEP_DB_KEY ? 'environment' :
+    (process.env.SCOPEKEEP_DB_KEY_FILE ? 'configured-file' : 'workspace-key-file')
+});
 
 // ============================================================
 // INITIALIZE CONNECTION
 // ============================================================
 
-const db = new Database(DB_PATH);
+const db = openDatabase(DB_PATH);
 db.pragma('journal_mode = WAL');   // Better performance for concurrent reads
 db.pragma('foreign_keys = ON');    // Enforce referential integrity
+db.pragma('secure_delete = ON');   // Overwrite deleted content before pages are reused
 db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O for faster reads
 db.pragma('synchronous = NORMAL');  // Performance boost for WAL mode
 db.pragma('temp_store = MEMORY');   // Keep temp tables in memory
@@ -43,7 +193,8 @@ db.pragma('cache_size = -64000');   // 64MB cache size
 // Load sqlite-vec BEFORE creating any vec0 tables
 sqliteVec.load(db);
 
-logInfo(`[persyst] Database: ${DB_PATH}`);
+logInfo(`[scopekeep] Database: ${DB_PATH}`);
+logInfo(`[scopekeep] Workspace boundary: ${WORKSPACE_ID}`);
 
 // ============================================================
 // CREATE TABLES & SCHEMA MIGRATIONS
@@ -58,9 +209,9 @@ db.exec(`
     created_at      INTEGER DEFAULT (unixepoch()),
     last_accessed   INTEGER DEFAULT (unixepoch()),
     access_count    INTEGER DEFAULT 0,
-    valid_from      INTEGER DEFAULT (unixepoch()),
+    valid_from      INTEGER DEFAULT (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)),
     valid_until     INTEGER DEFAULT NULL,
-    assertion_time  INTEGER DEFAULT (unixepoch())
+    assertion_time  INTEGER DEFAULT (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
   )
 `);
 
@@ -82,9 +233,38 @@ if (!columnExists('memories', 'assertion_time')) {
   db.exec('ALTER TABLE memories ADD COLUMN assertion_time INTEGER DEFAULT (unixepoch())');
 }
 
+// ScopeKeep 3.0 uses millisecond precision so rapid consecutive updates have
+// an unambiguous validity boundary. Older databases stored these fields in
+// Unix seconds; migrate only values that are clearly second-based.
+db.exec(`
+  UPDATE memories SET valid_from = valid_from * 1000
+  WHERE valid_from IS NOT NULL AND valid_from < 100000000000;
+  UPDATE memories SET valid_until = valid_until * 1000
+  WHERE valid_until IS NOT NULL AND valid_until < 100000000000;
+  UPDATE memories SET assertion_time = assertion_time * 1000
+  WHERE assertion_time IS NOT NULL AND assertion_time < 100000000000;
+`);
+
+if (!columnExists('memories', 'summary')) {
+  db.exec('ALTER TABLE memories ADD COLUMN summary TEXT DEFAULT NULL');
+}
+
+if (!columnExists('memories', 'parent_id')) {
+  db.exec('ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL');
+}
+
+if (!columnExists('memories', 'hierarchy_level')) {
+  db.exec('ALTER TABLE memories ADD COLUMN hierarchy_level INTEGER DEFAULT 3');
+}
+
 // --- Migration: add namespace column for per-agent isolation ---
 if (!columnExists('memories', 'namespace')) {
   db.exec("ALTER TABLE memories ADD COLUMN namespace TEXT DEFAULT 'shared'");
+}
+
+if (!columnExists('memories', 'workspace_id')) {
+  db.exec("ALTER TABLE memories ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'legacy-unscoped'");
+  logInfo('[scopekeep] Existing unscoped memories were quarantined as legacy-unscoped.');
 }
 
 // --- Migration: add parent_id column for history tracing ---
@@ -94,7 +274,7 @@ if (!columnExists('memories', 'parent_id')) {
 
 // --- Index on namespace for fast filtered queries ---
 try {
-  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories (namespace)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_workspace_namespace ON memories (workspace_id, namespace, valid_until)');
 } catch (e) { /* Index already exists */ }
 
 // --- Contradictions table ---
@@ -123,14 +303,40 @@ db.exec(`
 // --- Agent Stats table ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS agent_stats (
-    agent_id              TEXT PRIMARY KEY,
+    agent_id              TEXT NOT NULL,
     memories_created      INTEGER DEFAULT 0,
     memories_confirmed    INTEGER DEFAULT 0,
     memories_contradicted INTEGER DEFAULT 0,
     reputation_score      REAL DEFAULT 1.0,
-    last_active           INTEGER DEFAULT (unixepoch())
+    last_active           INTEGER DEFAULT (unixepoch()),
+    workspace_id          TEXT NOT NULL,
+    PRIMARY KEY(workspace_id, agent_id)
   )
 `);
+
+if (!columnExists('agent_stats', 'workspace_id')) {
+  db.exec(`
+    ALTER TABLE agent_stats RENAME TO agent_stats_legacy;
+    CREATE TABLE agent_stats (
+      agent_id TEXT NOT NULL,
+      memories_created INTEGER DEFAULT 0,
+      memories_confirmed INTEGER DEFAULT 0,
+      memories_contradicted INTEGER DEFAULT 0,
+      reputation_score REAL DEFAULT 1.0,
+      last_active INTEGER DEFAULT (unixepoch()),
+      domain TEXT DEFAULT 'general',
+      workspace_id TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, agent_id)
+    );
+    INSERT INTO agent_stats (
+      agent_id, memories_created, memories_confirmed, memories_contradicted,
+      reputation_score, last_active, domain, workspace_id
+    ) SELECT agent_id, memories_created, memories_confirmed, memories_contradicted,
+      reputation_score, last_active, COALESCE(domain, 'general'), 'legacy-unscoped'
+      FROM agent_stats_legacy;
+    DROP TABLE agent_stats_legacy;
+  `);
+}
 
 // --- Migration: add domain column to agent_stats ---
 try {
@@ -149,30 +355,47 @@ db.exec(`
     session_id         TEXT,
     signature          TEXT NOT NULL,
     previous_hash      TEXT,
-    hash               TEXT NOT NULL
+    hash               TEXT NOT NULL,
+    workspace_id       TEXT NOT NULL
   )
 `);
 
-// --- FTS5 full-text search index (keyword search with BM25) ---
+if (!columnExists('attestations', 'workspace_id')) {
+  db.exec("ALTER TABLE attestations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'legacy-unscoped'");
+}
+
+// --- Schema version table (tracks migrations) ---
 db.exec(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    content,
-    content='memories',
-    content_rowid='id'
+  CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   )
 `);
 
-// --- FTS5 auto-sync triggers ---
-try {
+// --- Migration: enable porter stemming in FTS5 tokenizer ---
+const currentTokenizer = db.prepare("SELECT value FROM schema_meta WHERE key = 'fts_tokenizer'").get();
+if (!currentTokenizer || currentTokenizer.value !== 'porter_unicode61') {
+  logInfo('[scopekeep] Migrating FTS5 tokenizer to porter + unicode61...');
+  db.exec('DROP TRIGGER IF EXISTS memories_fts_insert');
+  db.exec('DROP TRIGGER IF EXISTS memories_fts_delete');
+  db.exec('DROP TRIGGER IF EXISTS memories_fts_update');
+  db.exec('DROP TABLE IF EXISTS memories_fts');
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+      content,
+      content='memories',
+      content_rowid='id',
+      tokenize='porter unicode61 remove_diacritics 2'
+    )
+  `);
+
   db.exec(`
     CREATE TRIGGER memories_fts_insert AFTER INSERT ON memories
     BEGIN
       INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
     END
   `);
-} catch (e) { /* trigger already exists */ }
-
-try {
   db.exec(`
     CREATE TRIGGER memories_fts_delete AFTER DELETE ON memories
     BEGIN
@@ -180,9 +403,6 @@ try {
       VALUES ('delete', old.id, old.content);
     END
   `);
-} catch (e) { /* trigger already exists */ }
-
-try {
   db.exec(`
     CREATE TRIGGER memories_fts_update AFTER UPDATE OF content ON memories
     BEGIN
@@ -192,24 +412,65 @@ try {
       VALUES (new.id, new.content);
     END
   `);
-} catch (e) { /* trigger already exists */ }
+
+  try {
+    db.exec("INSERT INTO memories_fts(rowid, content) SELECT id, content FROM memories WHERE valid_until IS NULL");
+    logInfo('[scopekeep] FTS5 index rebuilt with porter stemming.');
+  } catch (e) {
+    console.error('[scopekeep] FTS5 rebuild error:', e.message);
+  }
+
+  db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('fts_tokenizer', 'porter_unicode61')").run();
+}
 
 // --- Vector table for semantic search (384-dim embeddings) ---
-db.exec(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
-    embedding float[384]
-  )
-`);
+const vecDim = db.prepare("SELECT value FROM schema_meta WHERE key = 'vec_dimension'").get();
+if (!vecDim || Number(vecDim.value) !== EMBED_DIM) {
+  logInfo(`[scopekeep] Migrating vector dimension from ${vecDim ? vecDim.value : 'unset'} to ${EMBED_DIM}...`);
+  db.exec('DROP TABLE IF EXISTS memories_vec');
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
+      embedding float[${EMBED_DIM}]
+    )
+  `);
+  db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('vec_dimension', ?)").run(String(EMBED_DIM));
+  logInfo('[scopekeep] Vector table rebuilt with new dimension. Old vectors discarded — will regenerate on next insert.');
+} else {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
+      embedding float[${EMBED_DIM}]
+    )
+  `);
+}
 
 // --- Knowledge Graph: entities + edges ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS entities (
     id         INTEGER PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
     type       TEXT NOT NULL,
-    created_at INTEGER DEFAULT (unixepoch())
+    created_at INTEGER DEFAULT (unixepoch()),
+    workspace_id TEXT NOT NULL,
+    UNIQUE(workspace_id, name, type)
   )
 `);
+
+if (!columnExists('entities', 'workspace_id')) {
+  db.exec(`
+    ALTER TABLE entities RENAME TO entities_legacy;
+    CREATE TABLE entities (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch()),
+      workspace_id TEXT NOT NULL,
+      UNIQUE(workspace_id, name, type)
+    );
+    INSERT INTO entities (id, name, type, created_at, workspace_id)
+      SELECT id, name, type, created_at, 'legacy-unscoped' FROM entities_legacy;
+    DROP TABLE entities_legacy;
+  `);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS edges (
@@ -219,19 +480,42 @@ db.exec(`
     relation    TEXT NOT NULL,
     source_type TEXT NOT NULL,
     target_type TEXT NOT NULL,
-    created_at  INTEGER DEFAULT (unixepoch())
+    created_at  INTEGER DEFAULT (unixepoch()),
+    workspace_id TEXT NOT NULL
   )
 `);
+
+if (!columnExists('edges', 'workspace_id')) {
+  db.exec("ALTER TABLE edges ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'legacy-unscoped'");
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS watched_files (
-    file_path     TEXT PRIMARY KEY,
+    file_path     TEXT NOT NULL,
     last_position INTEGER NOT NULL,
-    updated_at    INTEGER DEFAULT (unixepoch())
+    updated_at    INTEGER DEFAULT (unixepoch()),
+    workspace_id  TEXT NOT NULL,
+    PRIMARY KEY(workspace_id, file_path)
   )
 `);
 
-logInfo('[persyst] Schema initialized ✓');
+if (!columnExists('watched_files', 'workspace_id')) {
+  db.exec(`
+    ALTER TABLE watched_files RENAME TO watched_files_legacy;
+    CREATE TABLE watched_files (
+      file_path TEXT NOT NULL,
+      last_position INTEGER NOT NULL,
+      updated_at INTEGER DEFAULT (unixepoch()),
+      workspace_id TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, file_path)
+    );
+    INSERT INTO watched_files (file_path, last_position, updated_at, workspace_id)
+      SELECT file_path, last_position, updated_at, 'legacy-unscoped' FROM watched_files_legacy;
+    DROP TABLE watched_files_legacy;
+  `);
+}
+
+logInfo('[scopekeep] Schema initialized ✓');
 
 // ============================================================
 // PREPARED STATEMENTS
@@ -241,10 +525,10 @@ logInfo('[persyst] Schema initialized ✓');
 const stmts = {
   // -- Insert --
   insertMemory: db.prepare(
-    'INSERT INTO memories (content, importance_score, namespace, parent_id) VALUES (?, ?, ?, ?)'
+    'INSERT INTO memories (content, summary, importance_score, namespace, parent_id, hierarchy_level, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ),
   insertVec: db.prepare(
-    'INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)'
+    'INSERT OR REPLACE INTO memories_vec (rowid, embedding) VALUES (?, ?)'
   ),
   insertProvenance: db.prepare(
     'INSERT INTO provenance (memory_id, source_type, source_id, confidence) VALUES (?, ?, ?, ?)'
@@ -253,77 +537,93 @@ const stmts = {
     'INSERT INTO contradictions (old_memory_id, new_memory_id, resolution_reason) VALUES (?, ?, ?)'
   ),
   upsertAgent: db.prepare(`
-    INSERT INTO agent_stats (agent_id) VALUES (?)
-    ON CONFLICT(agent_id) DO UPDATE SET last_active = unixepoch()
+    INSERT INTO agent_stats (agent_id, workspace_id) VALUES (?, ?)
+    ON CONFLICT(workspace_id, agent_id) DO UPDATE SET last_active = unixepoch()
   `),
   incrementCreated: db.prepare(
-    'UPDATE agent_stats SET memories_created = memories_created + 1 WHERE agent_id = ?'
+    'UPDATE agent_stats SET memories_created = memories_created + 1 WHERE agent_id = ? AND workspace_id = ?'
   ),
   incrementConfirmed: db.prepare(
-    'UPDATE agent_stats SET memories_confirmed = memories_confirmed + 1 WHERE agent_id = ?'
+    'UPDATE agent_stats SET memories_confirmed = memories_confirmed + 1 WHERE agent_id = ? AND workspace_id = ?'
   ),
   incrementContradicted: db.prepare(
-    'UPDATE agent_stats SET memories_contradicted = memories_contradicted + 1 WHERE agent_id = ?'
+    'UPDATE agent_stats SET memories_contradicted = memories_contradicted + 1 WHERE agent_id = ? AND workspace_id = ?'
   ),
   recalculateReputation: db.prepare(
-    'UPDATE agent_stats SET reputation_score = (memories_confirmed + 1.0) / (memories_contradicted + 1.0) WHERE agent_id = ?'
+    'UPDATE agent_stats SET reputation_score = MIN(1.0, (memories_confirmed + 1.0) / (memories_contradicted + 1.0)) WHERE agent_id = ? AND workspace_id = ?'
   ),
   insertAttestation: db.prepare(`
     INSERT INTO attestations (
       attestation_id, query, timestamp, memories_retrieved,
-      agent_id, session_id, signature, previous_hash, hash
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      agent_id, session_id, signature, previous_hash, hash, workspace_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
 
   // -- Read --
   getById: db.prepare(
-    'SELECT * FROM memories WHERE id = ? AND valid_until IS NULL'
+    'SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND valid_until IS NULL'
   ),
   getByIdNs: db.prepare(
-    "SELECT * FROM memories WHERE id = ? AND (namespace = ? OR namespace = 'shared') AND valid_until IS NULL"
+    "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND (namespace = ? OR namespace = ? OR namespace = 'shared') AND valid_until IS NULL"
   ),
   getAnyById: db.prepare(
-    'SELECT * FROM memories WHERE id = ?'
+    'SELECT * FROM memories WHERE id = ? AND workspace_id = ?'
   ),
   getRecent: db.prepare(
-    'SELECT * FROM memories WHERE valid_until IS NULL ORDER BY created_at DESC LIMIT ?'
+    'SELECT * FROM memories WHERE workspace_id = ? AND valid_until IS NULL ORDER BY created_at DESC LIMIT ?'
   ),
   getRecentNs: db.prepare(
-    "SELECT * FROM memories WHERE (namespace = ? OR namespace = 'shared') AND valid_until IS NULL ORDER BY created_at DESC LIMIT ?"
+    "SELECT * FROM memories WHERE workspace_id = ? AND (namespace = ? OR namespace = ? OR namespace = 'shared') AND valid_until IS NULL ORDER BY created_at DESC LIMIT ?"
   ),
   getImportant: db.prepare(
-    'SELECT * FROM memories WHERE valid_until IS NULL ORDER BY importance_score DESC LIMIT ?'
+    'SELECT * FROM memories WHERE workspace_id = ? AND valid_until IS NULL ORDER BY importance_score DESC LIMIT ?'
   ),
   getImportantNs: db.prepare(
-    "SELECT * FROM memories WHERE (namespace = ? OR namespace = 'shared') AND valid_until IS NULL ORDER BY importance_score DESC LIMIT ?"
+    "SELECT * FROM memories WHERE workspace_id = ? AND (namespace = ? OR namespace = ? OR namespace = 'shared') AND valid_until IS NULL ORDER BY importance_score DESC LIMIT ?"
   ),
+  getAsOfNs: db.prepare(`
+    SELECT * FROM memories
+    WHERE workspace_id = ?
+      AND (namespace = ? OR namespace = ? OR namespace = 'shared')
+      AND valid_from <= ?
+      AND (valid_until IS NULL OR valid_until > ?)
+      AND assertion_time <= ?
+    ORDER BY importance_score DESC, valid_from DESC, id DESC
+    LIMIT ?
+  `),
   getProvenance: db.prepare(
     'SELECT * FROM provenance WHERE memory_id = ? ORDER BY id DESC'
   ),
   getAllAgentStats: db.prepare(
-    'SELECT * FROM agent_stats ORDER BY reputation_score DESC'
+    'SELECT * FROM agent_stats WHERE workspace_id = ? ORDER BY reputation_score DESC'
   ),
   getAttestation: db.prepare(
-    'SELECT * FROM attestations WHERE attestation_id = ?'
+    'SELECT * FROM attestations WHERE attestation_id = ? AND workspace_id = ?'
   ),
   getLastAttestation: db.prepare(
-    'SELECT * FROM attestations ORDER BY id DESC LIMIT 1'
+    'SELECT * FROM attestations WHERE workspace_id = ? ORDER BY id DESC LIMIT 1'
   ),
   getAttestationsByDate: db.prepare(
-    'SELECT * FROM attestations WHERE timestamp >= ? AND timestamp <= ? ORDER BY id ASC'
+    'SELECT * FROM attestations WHERE timestamp >= ? AND timestamp <= ? AND workspace_id = ? ORDER BY id ASC'
   ),
 
   // -- Update --
   updateContent: db.prepare(
-    'UPDATE memories SET content = ? WHERE id = ?'
+    'UPDATE memories SET content = ? WHERE id = ? AND workspace_id = ?'
+  ),
+  updateTemporalStart: db.prepare(
+    'UPDATE memories SET valid_from = ?, assertion_time = ? WHERE id = ? AND workspace_id = ?'
   ),
   archiveMemory: db.prepare(
-    'UPDATE memories SET valid_until = unixepoch() WHERE id = ?'
+    "UPDATE memories SET valid_until = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE id = ? AND workspace_id = ?"
+  ),
+  archiveMemoryAt: db.prepare(
+    'UPDATE memories SET valid_until = ? WHERE id = ? AND workspace_id = ?'
   ),
 
   // -- Delete --
   deleteMemory: db.prepare(
-    'DELETE FROM memories WHERE id = ?'
+    'DELETE FROM memories WHERE id = ? AND workspace_id = ?'
   ),
   deleteVec: db.prepare(
     'DELETE FROM memories_vec WHERE rowid = ?'
@@ -335,91 +635,100 @@ const stmts = {
     SET access_count    = access_count + 1,
         importance_score = ROUND(MIN(importance_score + 0.1, 1.0), 4),
         last_accessed   = unixepoch()
-    WHERE id = ?
+    WHERE id = ? AND workspace_id = ?
   `),
   decay: db.prepare(`
     UPDATE memories
     SET importance_score = ROUND(MAX(importance_score * 0.95, 0.0), 4)
-    WHERE (unixepoch() - last_accessed) > 604800
+    WHERE workspace_id = ? AND (unixepoch() - last_accessed) > 604800
   `),
 
   // -- Search --
   searchFts: db.prepare(`
-    SELECT rowid AS id, rank
+    SELECT memories_fts.rowid AS id, memories_fts.rank AS rank
     FROM memories_fts
+    JOIN memories m ON m.id = memories_fts.rowid
     WHERE memories_fts MATCH ?
-    ORDER BY rank
+      AND m.workspace_id = ?
+      AND (m.namespace = ? OR m.namespace = ? OR m.namespace = 'shared')
+      AND m.valid_until IS NULL
+    ORDER BY memories_fts.rank
     LIMIT ?
   `),
   searchVec: db.prepare(`
-    SELECT rowid, distance
+    SELECT memories_vec.rowid, memories_vec.distance
     FROM memories_vec
-    WHERE embedding MATCH ?
-    AND k = ?
+    JOIN memories m ON m.id = memories_vec.rowid
+    WHERE memories_vec.embedding MATCH ?
+      AND k = ?
+      AND m.workspace_id = ?
+      AND (m.namespace = ? OR m.namespace = ? OR m.namespace = 'shared')
+      AND m.valid_until IS NULL
+    LIMIT ?
   `),
 
   // -- Entity CRUD --
   insertEntity: db.prepare(
-    'INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)'
+    'INSERT OR IGNORE INTO entities (name, type, workspace_id) VALUES (?, ?, ?)'
   ),
   getEntityByName: db.prepare(
-    'SELECT * FROM entities WHERE name = ?'
+    'SELECT * FROM entities WHERE name = ? AND workspace_id = ?'
   ),
   getEntityById: db.prepare(
-    'SELECT * FROM entities WHERE id = ?'
+    'SELECT * FROM entities WHERE id = ? AND workspace_id = ?'
   ),
   getAllEntities: db.prepare(
-    'SELECT * FROM entities ORDER BY created_at DESC LIMIT ?'
+    'SELECT * FROM entities WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?'
   ),
   deleteEntity: db.prepare(
-    'DELETE FROM entities WHERE id = ?'
+    'DELETE FROM entities WHERE id = ? AND workspace_id = ?'
   ),
   deleteEdgesByEntity: db.prepare(
     `DELETE FROM edges WHERE
-     (source_id = ? AND source_type = 'entity') OR
-     (target_id = ? AND target_type = 'entity')`
+     workspace_id = ? AND ((source_id = ? AND source_type = 'entity') OR
+     (target_id = ? AND target_type = 'entity'))`
   ),
 
   // -- Edges --
   insertEdge: db.prepare(
-    'INSERT INTO edges (source_id, target_id, relation, source_type, target_type) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO edges (source_id, target_id, relation, source_type, target_type, workspace_id) VALUES (?, ?, ?, ?, ?, ?)'
   ),
   getEdgesBySource: db.prepare(
-    'SELECT * FROM edges WHERE source_id = ? AND source_type = ?'
+    'SELECT * FROM edges WHERE source_id = ? AND source_type = ? AND workspace_id = ?'
   ),
   getEdgesByTarget: db.prepare(
-    'SELECT * FROM edges WHERE target_id = ? AND target_type = ?'
+    'SELECT * FROM edges WHERE target_id = ? AND target_type = ? AND workspace_id = ?'
   ),
   deleteEdgesByMemory: db.prepare(
     `DELETE FROM edges WHERE
-     (source_id = ? AND source_type = 'memory') OR
-     (target_id = ? AND target_type = 'memory')`
+     workspace_id = ? AND ((source_id = ? AND source_type = 'memory') OR
+     (target_id = ? AND target_type = 'memory'))`
   ),
 
   // -- Dedup --
   findMemoryByContent: db.prepare(
-    'SELECT id FROM memories WHERE content = ? AND valid_until IS NULL LIMIT 1'
+    'SELECT id FROM memories WHERE content = ? AND workspace_id = ? AND valid_until IS NULL LIMIT 1'
   ),
   findMemoryByContentNs: db.prepare(
-    "SELECT id FROM memories WHERE content = ? AND (namespace = ? OR namespace = 'shared') AND valid_until IS NULL LIMIT 1"
+    "SELECT id FROM memories WHERE content = ? AND workspace_id = ? AND (namespace = ? OR namespace = ? OR namespace = 'shared') AND valid_until IS NULL LIMIT 1"
   ),
 
   // -- Hash-prefix lookup for git dedup (Bug 1 fix) --
   findMemoryByHashPrefix: db.prepare(
-    'SELECT id FROM memories WHERE content LIKE ? AND valid_until IS NULL LIMIT 1'
+    'SELECT id FROM memories WHERE content LIKE ? AND workspace_id = ? AND valid_until IS NULL LIMIT 1'
   ),
 
   // -- Active memory count --
   getActiveMemoryCount: db.prepare(
-    'SELECT COUNT(*) as count FROM memories WHERE valid_until IS NULL'
+    'SELECT COUNT(*) as count FROM memories WHERE workspace_id = ? AND valid_until IS NULL'
   ),
   getActiveMemoryCountNs: db.prepare(
-    "SELECT COUNT(*) as count FROM memories WHERE (namespace = ? OR namespace = 'shared') AND valid_until IS NULL"
+    "SELECT COUNT(*) as count FROM memories WHERE workspace_id = ? AND (namespace = ? OR namespace = ? OR namespace = 'shared') AND valid_until IS NULL"
   ),
 
   // -- Namespace stats --
   getNamespaceStats: db.prepare(
-    'SELECT namespace, COUNT(*) as count FROM memories WHERE valid_until IS NULL GROUP BY namespace ORDER BY count DESC'
+    'SELECT namespace, COUNT(*) as count FROM memories WHERE workspace_id = ? AND valid_until IS NULL GROUP BY namespace ORDER BY count DESC'
   ),
 
   // -- Content size stats (exact character & token counts) --
@@ -431,7 +740,7 @@ const stmts = {
       COALESCE(MAX(LENGTH(content)), 0)  AS max_chars,
       COALESCE(MIN(LENGTH(content)), 0)  AS min_chars
     FROM memories
-    WHERE valid_until IS NULL
+    WHERE workspace_id = ? AND valid_until IS NULL
   `),
 
   // -- Namespace-level content stats --
@@ -441,7 +750,7 @@ const stmts = {
       COUNT(*)                      AS count,
       COALESCE(SUM(LENGTH(content)), 0) AS total_chars
     FROM memories
-    WHERE valid_until IS NULL
+    WHERE workspace_id = ? AND valid_until IS NULL
     GROUP BY namespace
     ORDER BY total_chars DESC
   `),
@@ -456,38 +765,38 @@ const stmts = {
 
   // -- Watcher Offsets --
   getWatchPosition: db.prepare(
-    'SELECT last_position FROM watched_files WHERE file_path = ?'
+    'SELECT last_position FROM watched_files WHERE file_path = ? AND workspace_id = ?'
   ),
   upsertWatchPosition: db.prepare(`
-    INSERT INTO watched_files (file_path, last_position)
-    VALUES (?, ?)
-    ON CONFLICT(file_path) DO UPDATE SET last_position = excluded.last_position, updated_at = unixepoch()
+    INSERT INTO watched_files (file_path, last_position, workspace_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT(workspace_id, file_path) DO UPDATE SET last_position = excluded.last_position, updated_at = unixepoch()
   `),
 
   // -- Internal lookups (pre-compiled for hot-loop use) --
   getAttestationByHash: db.prepare(
-    'SELECT * FROM attestations WHERE hash = ?'
+    'SELECT * FROM attestations WHERE hash = ? AND workspace_id = ?'
   ),
   getMemoryParentId: db.prepare(
-    'SELECT parent_id FROM memories WHERE id = ?'
+    'SELECT parent_id FROM memories WHERE id = ? AND workspace_id = ?'
   ),
   getMemoryChildren: db.prepare(
-    'SELECT id FROM memories WHERE parent_id = ?'
+    'SELECT id FROM memories WHERE parent_id = ? AND workspace_id = ?'
   ),
   getMemoryContentById: db.prepare(
-    'SELECT content FROM memories WHERE id = ?'
+    'SELECT content FROM memories WHERE id = ? AND workspace_id = ?'
   ),
   getMemoryByIdRaw: db.prepare(
-    'SELECT * FROM memories WHERE id = ? AND valid_until IS NULL'
+    'SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND valid_until IS NULL'
   ),
   getMemoryLikeContent: db.prepare(
-    'SELECT id FROM memories WHERE content LIKE ? AND valid_until IS NULL'
+    'SELECT id FROM memories WHERE content LIKE ? AND workspace_id = ? AND valid_until IS NULL'
   ),
   getVecByRowId: db.prepare(
     'SELECT embedding FROM memories_vec WHERE rowid = ?'
   ),
   updateMemoryParentId: db.prepare(
-    'UPDATE memories SET parent_id = ? WHERE id = ?'
+    'UPDATE memories SET parent_id = ? WHERE id = ? AND workspace_id = ?'
   ),
   deleteProvenanceByMemoryId: db.prepare(
     'DELETE FROM provenance WHERE memory_id = ?'
@@ -496,23 +805,23 @@ const stmts = {
     'DELETE FROM contradictions WHERE old_memory_id = ? OR new_memory_id = ?'
   ),
   getReputationScore: db.prepare(
-    'SELECT reputation_score FROM agent_stats WHERE agent_id = ?'
+    'SELECT reputation_score FROM agent_stats WHERE agent_id = ? AND workspace_id = ?'
   ),
   updateProvenanceOwner: db.prepare(
     "UPDATE provenance SET source_type = 'agent', source_id = ?, confidence = 1.0 WHERE memory_id = ?"
   ),
   archiveMemoryById: db.prepare(
-    'UPDATE memories SET valid_until = unixepoch() WHERE id = ?'
+    "UPDATE memories SET valid_until = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE id = ? AND workspace_id = ?"
   ),
   getEdgesBySourceAndType: db.prepare(`
     SELECT * FROM edges
-    WHERE (source_id = ? AND source_type = ?)
-       OR (target_id = ? AND target_type = ?)
+    WHERE workspace_id = ? AND ((source_id = ? AND source_type = ?)
+       OR (target_id = ? AND target_type = ?))
   `),
   getMemoriesByEntityEdges: db.prepare(`
     SELECT * FROM edges
-    WHERE (source_id = ? AND source_type = 'entity' AND target_type = 'memory')
-       OR (target_id = ? AND target_type = 'entity' AND source_type = 'memory')
+    WHERE workspace_id = ? AND ((source_id = ? AND source_type = 'entity' AND target_type = 'memory')
+       OR (target_id = ? AND target_type = 'entity' AND source_type = 'memory'))
   `),
   consolidateVecSearch: db.prepare(`
     SELECT rowid AS id, distance
@@ -521,12 +830,12 @@ const stmts = {
     AND k = 30
   `),
   archiveAndInsertContradiction: db.prepare(
-    'UPDATE memories SET valid_until = unixepoch() WHERE id = ?'
+    "UPDATE memories SET valid_until = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE id = ?"
   ),
   archiveExpiredTransientMemories: db.prepare(`
     UPDATE memories 
-    SET valid_until = unixepoch() 
-    WHERE valid_until IS NULL 
+    SET valid_until = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
+    WHERE workspace_id = ? AND valid_until IS NULL 
       AND (content LIKE 'Reminder:%' OR content LIKE 'Note:%') 
       AND (unixepoch() - created_at) > 1209600
   `)
@@ -640,13 +949,24 @@ export function redactSecrets(content) {
  * @param {string} namespace - Namespace for agent isolation (default: 'shared')
  * @returns {number} The new memory's ID
  */
-export function insertMemory(content, importance = 1.0, provenanceInfo = null, namespace = 'shared', parentId = null) {
+export function insertMemory(content, importance = 1.0, provenanceInfo = null, namespace = 'shared', parentId = null, hierarchyLevel = 3) {
   const redactedContent = redactSecrets(content);
   if (redactedContent && redactedContent.length > 10000) {
     throw new Error('Memory content exceeds maximum length of 10000 characters.');
   }
+  const summary = compressFact(redactedContent);
   const clampedImportance = Math.max(0.0, Math.min(1.0, Math.round(importance * 10000) / 10000));
-  const result = stmts.insertMemory.run(redactedContent, clampedImportance, namespace || 'shared', parentId);
+  const normalizedNamespace = String(namespace || 'shared').trim().toLowerCase();
+  if (normalizedNamespace === 'all') throw new Error('The "all" namespace cannot be stored.');
+  const result = stmts.insertMemory.run(
+    redactedContent,
+    summary,
+    clampedImportance,
+    normalizedNamespace,
+    parentId,
+    hierarchyLevel || 3,
+    WORKSPACE_ID
+  );
   const id = Number(result.lastInsertRowid);
 
   // Provenance Info handling
@@ -673,7 +993,21 @@ export function insertMemory(content, importance = 1.0, provenanceInfo = null, n
  * @param {Float32Array} embedding - 384-dim embedding vector
  */
 export function insertVector(id, embedding) {
-  stmts.insertVec.run(BigInt(id), Buffer.from(embedding.buffer));
+  stmts.insertVec.run(BigInt(id), Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength));
+}
+
+/**
+ * Find all memories that do not have a vector in the vector index.
+ * @returns {Array<{id: number, content: string}>}
+ */
+export function getMemoriesMissingVectors() {
+  return db.prepare(`
+    SELECT id, content 
+    FROM memories 
+    WHERE id NOT IN (SELECT rowid FROM memories_vec) 
+    AND workspace_id = ?
+    AND valid_until IS NULL
+  `).all(WORKSPACE_ID);
 }
 
 /**
@@ -683,9 +1017,8 @@ export function insertVector(id, embedding) {
  * @returns {object|null} The memory row, or null if not found
  */
 export function getMemory(id, namespace = null) {
-  const memory = (namespace === 'all' || namespace === null)
-    ? stmts.getById.get(id)
-    : stmts.getByIdNs.get(id, namespace);
+  const [first, second] = accessPair(namespace);
+  const memory = stmts.getByIdNs.get(id, WORKSPACE_ID, first, second);
   if (memory) {
     boostMemory(id);
     memory.provenance = getProvenance(id);
@@ -698,7 +1031,7 @@ export function getMemory(id, namespace = null) {
  * @returns {object|null} The memory row, or null if not found
  */
 export function getAnyMemoryById(id) {
-  const memory = stmts.getAnyById.get(id);
+  const memory = stmts.getAnyById.get(id, WORKSPACE_ID);
   if (memory) {
     memory.provenance = getProvenance(id);
   }
@@ -712,9 +1045,8 @@ export function getAnyMemoryById(id) {
  * @returns {object|null} The memory row, or null if not found
  */
 export function getMemoryById(id, namespace = null) {
-  const memory = (namespace === 'all' || namespace === null)
-    ? stmts.getById.get(id)
-    : stmts.getByIdNs.get(id, namespace);
+  const [first, second] = accessPair(namespace);
+  const memory = stmts.getByIdNs.get(id, WORKSPACE_ID, first, second);
   if (memory) {
     memory.provenance = getProvenance(id);
   }
@@ -728,7 +1060,7 @@ export function getMemoryById(id, namespace = null) {
  */
 export function updateMemoryContent(id, content) {
   const redactedContent = redactSecrets(content);
-  const result = stmts.updateContent.run(redactedContent, id);
+  const result = stmts.updateContent.run(redactedContent, id, WORKSPACE_ID);
   return result.changes > 0;
 }
 
@@ -744,16 +1076,17 @@ export function deleteVec(id) {
  * FTS5 index auto-updates via trigger.
  * @returns {boolean} true if the memory existed and was deleted
  */
-export function deleteMemory(id) {
-  stmts.deleteEdgesByMemory.run(id, id);
+export function deleteMemory(id, namespace = null) {
+  if (!getMemoryById(id, namespace)) return false;
+  stmts.deleteEdgesByMemory.run(WORKSPACE_ID, id, id);
   deleteVec(id);  // Remove vector first (no cascades on virtual tables)
   try {
     stmts.deleteProvenanceByMemoryId.run(id);
     stmts.deleteContradictionsByMemoryId.run(id, id);
   } catch (e) {
-    console.error(`[persyst] Clean up provenance/contradictions error: ${e.message}`);
+    console.error(`[scopekeep] Clean up provenance/contradictions error: ${e.message}`);
   }
-  const result = stmts.deleteMemory.run(id);
+  const result = stmts.deleteMemory.run(id, WORKSPACE_ID);
   return result.changes > 0;
 }
 
@@ -767,12 +1100,43 @@ export function getRecentMemories(limit = 10, namespace = null) {
     throw new Error('Limit must be a positive integer.');
   }
   const parsedLimit = Math.floor(limit);
-  const ns = namespace || 'shared';
-  const rows = ns === 'all'
-    ? stmts.getRecent.all(parsedLimit)
-    : stmts.getRecentNs.all(ns, parsedLimit);
+  const [first, second] = accessPair(namespace);
+  const rows = stmts.getRecentNs.all(WORKSPACE_ID, first, second, parsedLimit);
   rows.forEach(r => {
     r.provenance = getProvenance(r.id);
+  });
+  return rows;
+}
+
+/**
+ * Return the memories that were valid and already asserted at a point in time.
+ * Timestamps use Unix milliseconds; provenance is included for review/audit UI.
+ *
+ * @param {number} asOf - Unix timestamp in milliseconds
+ * @param {number} limit - Max results
+ * @param {string|null} namespace - Namespace filter
+ */
+export function getMemoriesAsOf(asOf, limit = 50, namespace = null) {
+  if (!Number.isFinite(asOf) || asOf < 0) {
+    throw new Error('asOf must be a valid Unix timestamp in milliseconds.');
+  }
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error('Limit must be a positive integer.');
+  }
+  const timestamp = Math.trunc(asOf);
+  const parsedLimit = Math.min(500, Math.floor(limit));
+  const [first, second] = accessPair(namespace);
+  const rows = stmts.getAsOfNs.all(
+    WORKSPACE_ID,
+    first,
+    second,
+    timestamp,
+    timestamp,
+    timestamp,
+    parsedLimit
+  );
+  rows.forEach(row => {
+    row.provenance = getProvenance(row.id);
   });
   return rows;
 }
@@ -787,10 +1151,8 @@ export function getImportantMemories(limit = 10, namespace = null) {
     throw new Error('Limit must be a positive integer.');
   }
   const parsedLimit = Math.floor(limit);
-  const ns = namespace || 'shared';
-  const rows = ns === 'all'
-    ? stmts.getImportant.all(parsedLimit)
-    : stmts.getImportantNs.all(ns, parsedLimit);
+  const [first, second] = accessPair(namespace);
+  const rows = stmts.getImportantNs.all(WORKSPACE_ID, first, second, parsedLimit);
   rows.forEach(r => {
     r.provenance = getProvenance(r.id);
   });
@@ -807,7 +1169,7 @@ export function getImportantMemories(limit = 10, namespace = null) {
  * and updates last_accessed timestamp.
  */
 export function boostMemory(id) {
-  stmts.boost.run(id);
+  stmts.boost.run(id, WORKSPACE_ID);
 }
 
 /**
@@ -816,10 +1178,56 @@ export function boostMemory(id) {
  * Called automatically every hour by the server.
  */
 export function applyTemporalDecay() {
-  const result = stmts.decay.run();
+  const result = stmts.decay.run(WORKSPACE_ID);
   if (result.changes > 0) {
-    console.error(`[persyst] Decay applied to ${result.changes} memories`);
+    console.error(`[scopekeep] Decay applied to ${result.changes} memories`);
   }
+}
+
+// ============================================================
+// FTS5 QUERY PREPARATION
+// ============================================================
+
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+  'of', 'is', 'was', 'are', 'be', 'been', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'can', 'could', 'shall', 'should', 'may', 'might', 'must',
+  'i', 'you', 'he', 'she', 'it', 'we', 'they', 'my', 'your', 'his', 'her',
+  'its', 'our', 'their', 'me', 'him', 'us', 'them', 'what', 'which', 'who',
+  'whom', 'when', 'where', 'why', 'how', 'this', 'that', 'these', 'those',
+  'am', 'not', 'no', 'nor', 'if', 'because', 'so', 'as', 'until', 'while',
+  'about', 'between', 'into', 'through', 'during', 'before', 'after',
+  'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again',
+  'further', 'then', 'once', 'here', 'there', 'all', 'any', 'both', 'each',
+  'few', 'more', 'most', 'other', 'some', 'such', 'only', 'own', 'same',
+  'too', 'very', 'just', 'also', 'than', 'been', 'being', 'having', 'doing',
+  'get', 'got', 'let', 'make', 'them', 'well', 'went', 'were', 'yes',
+]);
+
+/**
+ * Prepare a natural-language query for FTS5 matching.
+ * - Lowercases and tokenizes
+ * - Removes English stopwords (common noise words)
+ * - Joins remaining terms with OR for lenient matching
+ * - The porter stemmer (set in tokenizer) handles morphological variants
+ *
+ * BM25 ranking ensures documents matching more terms rank highest.
+ */
+export function prepareFtsQuery(query) {
+  const cleaned = query.toLowerCase().replace(/\s+/g, ' ').trim();
+  const terms = cleaned.split(/[^a-z0-9']+/).filter(t => t.length > 0).map(t => t.replace(/'/g, ''));
+  const filtered = terms.filter(t => t.length > 1 && !STOPWORDS.has(t));
+
+  if (filtered.length === 0) {
+    // Fallback: if all terms were stopwords, use the original query
+    return cleaned;
+  }
+  if (filtered.length === 1) {
+    return filtered[0];
+  }
+
+  // OR matching: any term can match, BM25 ranks by coverage
+  return filtered.join(' OR ');
 }
 
 // ============================================================
@@ -828,14 +1236,22 @@ export function applyTemporalDecay() {
 
 /**
  * Keyword search using FTS5 with BM25 ranking.
+ * Uses query expansion (stopword removal, OR matching) and
+ * the porter stemmer for morphological variant matching.
  * @returns {Array<{id: number, rank: number}>}
  */
-export function searchKeyword(query, limit = 10) {
+export function searchKeyword(query, limit = 10, namespace = null) {
+  const ftsQuery = prepareFtsQuery(query);
+  const [first, second] = accessPair(namespace);
   try {
-    return stmts.searchFts.all(query, limit);
+    return stmts.searchFts.all(ftsQuery, WORKSPACE_ID, first, second, limit);
   } catch (e) {
-    // FTS5 can throw on special characters in query
-    return [];
+    // FTS5 can throw on special characters in query; fallback to raw
+    try {
+      return stmts.searchFts.all(query, WORKSPACE_ID, first, second, limit);
+    } catch (e2) {
+      return [];
+    }
   }
 }
 
@@ -844,12 +1260,22 @@ export function searchKeyword(query, limit = 10) {
  * @param {Float32Array} embedding - Query vector (384-dim)
  * @returns {Array<{rowid: number, distance: number}>}
  */
-export function searchVector(embedding, limit = 10) {
+export function searchVector(embedding, limit = 10, namespace = null) {
   if (typeof limit !== 'number' || isNaN(limit) || limit <= 0) {
     throw new Error('Limit must be a positive integer.');
   }
   const parsedLimit = Math.floor(limit);
-  return stmts.searchVec.all(Buffer.from(embedding.buffer), parsedLimit);
+  const [first, second] = accessPair(namespace);
+  const globalVectorCount = Number(db.prepare('SELECT COUNT(*) AS count FROM memories_vec').get().count);
+  const candidateLimit = Math.max(parsedLimit, globalVectorCount);
+  return stmts.searchVec.all(
+    Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength),
+    candidateLimit,
+    WORKSPACE_ID,
+    first,
+    second,
+    parsedLimit
+  );
 }
 
 // ============================================================
@@ -862,10 +1288,10 @@ export function searchVector(embedding, limit = 10) {
  * @returns {number|null} The entity ID, or null if already existed
  */
 export function insertEntity(name, type) {
-  const result = stmts.insertEntity.run(name, type);
+  const result = stmts.insertEntity.run(name, type, WORKSPACE_ID);
   if (result.changes === 0) {
     // Already exists — return existing ID
-    const existing = stmts.getEntityByName.get(name);
+    const existing = stmts.getEntityByName.get(name, WORKSPACE_ID);
     return existing ? existing.id : null;
   }
   return Number(result.lastInsertRowid);
@@ -875,45 +1301,52 @@ export function insertEntity(name, type) {
  * Get an entity by its name.
  */
 export function getEntityByName(name) {
-  return stmts.getEntityByName.get(name) || null;
+  return stmts.getEntityByName.get(name, WORKSPACE_ID) || null;
 }
 
 /**
  * Get an entity by its ID.
  */
 export function getEntityById(id) {
-  return stmts.getEntityById.get(id) || null;
+  return stmts.getEntityById.get(id, WORKSPACE_ID) || null;
 }
 
 /**
  * Get all entities, most recent first.
  */
 export function getAllEntities(limit = 50) {
-  return stmts.getAllEntities.all(limit);
+  return stmts.getAllEntities.all(WORKSPACE_ID, limit);
 }
 
 /**
  * Delete an entity and its edges.
  */
 export function deleteEntity(id) {
-  stmts.deleteEdgesByEntity.run(id, id);
-  stmts.deleteEntity.run(id);
+  if (!getEntityById(id)) return false;
+  stmts.deleteEdgesByEntity.run(WORKSPACE_ID, id, id);
+  const result = stmts.deleteEntity.run(id, WORKSPACE_ID);
+  return result.changes > 0;
 }
 
 /**
  * Create an edge connecting two nodes (entity↔entity or entity↔memory).
  */
 export function insertEdge(sourceId, targetId, relation, sourceType, targetType) {
-  stmts.insertEdge.run(sourceId, targetId, relation, sourceType, targetType);
+  if (sourceType === 'memory' && !getAnyMemoryById(sourceId)) throw new Error('Source memory is outside the active workspace.');
+  if (targetType === 'memory' && !getAnyMemoryById(targetId)) throw new Error('Target memory is outside the active workspace.');
+  if (sourceType === 'entity' && !getEntityById(sourceId)) throw new Error('Source entity is outside the active workspace.');
+  if (targetType === 'entity' && !getEntityById(targetId)) throw new Error('Target entity is outside the active workspace.');
+  stmts.insertEdge.run(sourceId, targetId, relation, sourceType, targetType, WORKSPACE_ID);
 }
 
 /**
  * Get all memories linked to an entity.
  */
-export function getMemoriesByEntity(entityId) {
-  const edges = stmts.getMemoriesByEntityEdges.all(entityId, entityId);
+export function getMemoriesByEntity(entityId, namespace = null) {
+  if (!getEntityById(entityId)) return [];
+  const edges = stmts.getMemoriesByEntityEdges.all(WORKSPACE_ID, entityId, entityId);
   const memoryIds = edges.map(e => e.source_type === 'memory' ? e.source_id : e.target_id);
-  return memoryIds.map(id => stmts.getById.get(id)).filter(Boolean);
+  return memoryIds.map(id => getMemoryById(id, namespace)).filter(Boolean);
 }
 
 /**
@@ -924,10 +1357,8 @@ export function getMemoriesByEntity(entityId) {
  * @returns {boolean}
  */
 export function memoryExists(content, namespace = null) {
-  if (namespace) {
-    return stmts.findMemoryByContentNs.get(content, namespace) !== undefined;
-  }
-  return stmts.findMemoryByContent.get(content) !== undefined;
+  const [first, second] = accessPair(namespace);
+  return stmts.findMemoryByContentNs.get(content, WORKSPACE_ID, first, second) !== undefined;
 }
 
 /**
@@ -937,7 +1368,7 @@ export function memoryExists(content, namespace = null) {
  * @returns {boolean}
  */
 export function memoryExistsByHashPrefix(pattern) {
-  return stmts.findMemoryByHashPrefix.get(pattern) !== undefined;
+  return stmts.findMemoryByHashPrefix.get(pattern, WORKSPACE_ID) !== undefined;
 }
 
 /**
@@ -946,10 +1377,8 @@ export function memoryExistsByHashPrefix(pattern) {
  * @returns {number}
  */
 export function getActiveMemoryCount(namespace = null) {
-  if (namespace && namespace !== 'all') {
-    return stmts.getActiveMemoryCountNs.get(namespace).count;
-  }
-  return stmts.getActiveMemoryCount.get().count;
+  const [first, second] = accessPair(namespace);
+  return stmts.getActiveMemoryCountNs.get(WORKSPACE_ID, first, second).count;
 }
 
 /**
@@ -957,7 +1386,7 @@ export function getActiveMemoryCount(namespace = null) {
  * @returns {Array<{namespace: string, count: number}>}
  */
 export function getNamespaceStats() {
-  return stmts.getNamespaceStats.all();
+  return stmts.getNamespaceStats.all(WORKSPACE_ID);
 }
 
 /**
@@ -967,7 +1396,7 @@ export function getNamespaceStats() {
  * @returns {{ memory_count, total_chars, avg_chars, max_chars, min_chars }}
  */
 export function getContentStats() {
-  const row = stmts.getContentStats.get();
+  const row = stmts.getContentStats.get(WORKSPACE_ID);
   const totalChars = Number(row.total_chars);
   const avgChars   = Number(row.avg_chars);
   return {
@@ -986,7 +1415,7 @@ export function getContentStats() {
  * @returns {Array<{namespace, count, total_chars, raw_tokens_exact}>}
  */
 export function getNamespaceContentStats() {
-  return stmts.getNamespaceContentStats.all().map(row => ({
+  return stmts.getNamespaceContentStats.all(WORKSPACE_ID).map(row => ({
     namespace:        row.namespace,
     count:            Number(row.count),
     total_chars:      Number(row.total_chars),
@@ -1006,9 +1435,8 @@ export function getNamespaceContentStats() {
  * @returns {object|null} The memory row, or null if not found
  */
 export function getMemoryByContent(content, namespace = null) {
-  const row = namespace
-    ? stmts.findMemoryByContentNs.get(content, namespace)
-    : stmts.findMemoryByContent.get(content);
+  const [first, second] = accessPair(namespace);
+  const row = stmts.findMemoryByContentNs.get(content, WORKSPACE_ID, first, second);
   return row ? getMemoryById(row.id, namespace) : null;
 }
 
@@ -1020,16 +1448,28 @@ export function getMemoryByContent(content, namespace = null) {
  * Archive a memory and log the contradiction.
  */
 export function logContradiction(oldMemoryId, newMemoryId, reason = '') {
-  stmts.archiveMemory.run(oldMemoryId);
+  const oldMemory = getAnyMemoryById(oldMemoryId);
+  const newMemory = getAnyMemoryById(newMemoryId);
+  if (!oldMemory || !newMemory) {
+    throw new Error('Contradiction links must remain inside the active workspace.');
+  }
+  // Use the new version's validity start as the exact hand-off boundary. If
+  // both rows were created within one millisecond, advance the new version by
+  // one millisecond so the old version still has a non-empty validity window.
+  const boundary = Math.max(Number(newMemory.valid_from), Number(oldMemory.valid_from) + 1);
+  if (boundary !== Number(newMemory.valid_from)) {
+    stmts.updateTemporalStart.run(boundary, boundary, newMemoryId, WORKSPACE_ID);
+  }
+  stmts.archiveMemoryAt.run(boundary, oldMemoryId, WORKSPACE_ID);
   stmts.insertContradiction.run(oldMemoryId, newMemoryId, reason);
 
   // Set parent_id to link memories for bidirectional history tracing (always newer pointing to older)
   try {
     const parentId = Math.min(oldMemoryId, newMemoryId);
     const childId = Math.max(oldMemoryId, newMemoryId);
-    stmts.updateMemoryParentId.run(parentId, childId);
+    stmts.updateMemoryParentId.run(parentId, childId, WORKSPACE_ID);
   } catch (e) {
-    console.error(`[persyst] Failed to set parent_id on contradiction: ${e.message}`);
+    console.error(`[scopekeep] Failed to set parent_id on contradiction: ${e.message}`);
   }
 
   // Retrieve provenance of both versions for game-theoretic reputation calculation
@@ -1071,22 +1511,22 @@ export function incrementAgentStat(agentId, action) {
   if (normalizedAgentId === 'antigravity-worker' || normalizedAgentId === 'user-dialogue') {
     return; // Ignore internal/system identities from reputation penalties
   }
-  stmts.upsertAgent.run(normalizedAgentId);
+  stmts.upsertAgent.run(normalizedAgentId, WORKSPACE_ID);
   if (action === 'created') {
-    stmts.incrementCreated.run(normalizedAgentId);
+    stmts.incrementCreated.run(normalizedAgentId, WORKSPACE_ID);
   } else if (action === 'confirmed') {
-    stmts.incrementConfirmed.run(normalizedAgentId);
+    stmts.incrementConfirmed.run(normalizedAgentId, WORKSPACE_ID);
   } else if (action === 'contradicted') {
-    stmts.incrementContradicted.run(normalizedAgentId);
+    stmts.incrementContradicted.run(normalizedAgentId, WORKSPACE_ID);
   }
-  stmts.recalculateReputation.run(normalizedAgentId);
+  stmts.recalculateReputation.run(normalizedAgentId, WORKSPACE_ID);
 }
 
 /**
  * Get all agent stats.
  */
 export function getAllAgentStats() {
-  return stmts.getAllAgentStats.all();
+  return stmts.getAllAgentStats.all(WORKSPACE_ID);
 }
 
 /**
@@ -1102,29 +1542,48 @@ export function insertAttestation(att) {
     att.session_id || null,
     att.signature,
     att.previous_hash || null,
-    att.hash
+    att.hash,
+    WORKSPACE_ID
   );
+}
+
+/**
+ * Atomically append an attestation after acquiring SQLite's write lock.
+ * The callback receives the current workspace chain head and returns a signed record.
+ */
+export function appendAttestation(createRecord) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const previous = stmts.getLastAttestation.get(WORKSPACE_ID) || null;
+    const record = createRecord(previous);
+    insertAttestation(record);
+    db.exec('COMMIT');
+    return record;
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    throw err;
+  }
 }
 
 /**
  * Retrieve a specific attestation by ID.
  */
 export function getAttestationById(attestationId) {
-  return stmts.getAttestation.get(attestationId) || null;
+  return stmts.getAttestation.get(attestationId, WORKSPACE_ID) || null;
 }
 
 /**
  * Retrieve the last attestation logged for chaining.
  */
 export function getLastAttestation() {
-  return stmts.getLastAttestation.get() || null;
+  return stmts.getLastAttestation.get(WORKSPACE_ID) || null;
 }
 
 /**
  * Retrieve attestations within a timestamp range.
  */
 export function getAttestationsByDateRange(startDate, endDate) {
-  return stmts.getAttestationsByDate.all(startDate, endDate);
+  return stmts.getAttestationsByDate.all(startDate, endDate, WORKSPACE_ID);
 }
 
 /**
@@ -1140,13 +1599,13 @@ export function getMemoryHistoryChain(memoryId) {
     versions.add(currentId);
 
     // 1. Find parent (ancestor) from memories table
-    const row = stmts.getMemoryParentId.get(currentId);
+    const row = stmts.getMemoryParentId.get(currentId, WORKSPACE_ID);
     if (row && row.parent_id !== null) {
       if (!versions.has(row.parent_id)) queue.push(row.parent_id);
     }
 
     // 2. Find children (descendants) from memories table
-    const children = stmts.getMemoryChildren.all(currentId);
+    const children = stmts.getMemoryChildren.all(currentId, WORKSPACE_ID);
     for (const child of children) {
       if (!versions.has(child.id)) queue.push(child.id);
     }
@@ -1170,9 +1629,9 @@ export function getMemoryHistoryChain(memoryId) {
   const placeholders = ids.map(() => '?').join(',');
   const rows = db.prepare(`
     SELECT * FROM memories
-    WHERE id IN (${placeholders})
+    WHERE workspace_id = ? AND id IN (${placeholders})
     ORDER BY created_at ASC
-  `).all(...ids);
+  `).all(WORKSPACE_ID, ...ids);
 
   for (const row of rows) {
     const prov = getProvenance(row.id);
@@ -1198,7 +1657,8 @@ export function getMemoryHistoryChain(memoryId) {
  */
 export function searchAllMemoriesFts(queryText, limit = 10) {
   try {
-    return stmts.searchFts.all(queryText, limit);
+    const [first, second] = accessPair(null);
+    return stmts.searchFts.all(queryText, WORKSPACE_ID, first, second, limit);
   } catch (e) {
     return [];
   }
@@ -1208,7 +1668,7 @@ export function searchAllMemoriesFts(queryText, limit = 10) {
  * Retrieve the last read position of a watched file.
  */
 export function getWatchPosition(filePath) {
-  const row = stmts.getWatchPosition.get(filePath);
+  const row = stmts.getWatchPosition.get(filePath, WORKSPACE_ID);
   return row ? row.last_position : 0;
 }
 
@@ -1216,7 +1676,182 @@ export function getWatchPosition(filePath) {
  * Upsert the last read position of a watched file.
  */
 export function upsertWatchPosition(filePath, position) {
-  stmts.upsertWatchPosition.run(filePath, position);
+  stmts.upsertWatchPosition.run(filePath, position, WORKSPACE_ID);
+}
+
+// ============================================================
+// WORKSPACE PRIVACY CONTROLS
+// ============================================================
+
+function encodeSqliteValue(value) {
+  if (Buffer.isBuffer(value)) {
+    return { encoding: 'base64', data: value.toString('base64') };
+  }
+  if (value instanceof Uint8Array) {
+    return { encoding: 'base64', data: Buffer.from(value).toString('base64') };
+  }
+  return value;
+}
+
+function encodeRows(rows) {
+  return rows.map(row => Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, encodeSqliteValue(value)])
+  ));
+}
+
+/**
+ * Export every record owned by a workspace, including archived memories,
+ * derived vector data, provenance, graph data, watcher offsets, and evidence.
+ */
+export function exportWorkspaceData(workspaceId = WORKSPACE_ID) {
+  if (!workspaceId || typeof workspaceId !== 'string') {
+    throw new Error('A valid workspace ID is required for privacy export.');
+  }
+
+  const records = {
+    memories: db.prepare(`
+      SELECT * FROM memories
+      WHERE workspace_id = ?
+      ORDER BY id ASC
+    `).all(workspaceId),
+    provenance: db.prepare(`
+      SELECT p.*
+      FROM provenance p
+      JOIN memories m ON m.id = p.memory_id
+      WHERE m.workspace_id = ?
+      ORDER BY p.id ASC
+    `).all(workspaceId),
+    contradictions: db.prepare(`
+      SELECT DISTINCT c.*
+      FROM contradictions c
+      LEFT JOIN memories old_m ON old_m.id = c.old_memory_id
+      LEFT JOIN memories new_m ON new_m.id = c.new_memory_id
+      WHERE old_m.workspace_id = ? OR new_m.workspace_id = ?
+      ORDER BY c.id ASC
+    `).all(workspaceId, workspaceId),
+    vectors: encodeRows(db.prepare(`
+      SELECT v.rowid AS memory_id, v.embedding
+      FROM memories_vec v
+      JOIN memories m ON m.id = v.rowid
+      WHERE m.workspace_id = ?
+      ORDER BY v.rowid ASC
+    `).all(workspaceId)),
+    entities: db.prepare('SELECT * FROM entities WHERE workspace_id = ? ORDER BY id ASC').all(workspaceId),
+    edges: db.prepare('SELECT * FROM edges WHERE workspace_id = ? ORDER BY id ASC').all(workspaceId),
+    agent_stats: db.prepare('SELECT * FROM agent_stats WHERE workspace_id = ? ORDER BY agent_id ASC').all(workspaceId),
+    attestations: db.prepare('SELECT * FROM attestations WHERE workspace_id = ? ORDER BY id ASC').all(workspaceId),
+    watched_files: db.prepare('SELECT * FROM watched_files WHERE workspace_id = ? ORDER BY file_path ASC').all(workspaceId)
+  };
+
+  return {
+    format: 'scopekeep-workspace-export',
+    format_version: 1,
+    exported_at: new Date().toISOString(),
+    workspace_id: workspaceId,
+    workspace_root: workspaceId === WORKSPACE_ID ? WORKSPACE_ROOT : null,
+    schema: Object.fromEntries(
+      db.prepare('SELECT key, value FROM schema_meta ORDER BY key ASC')
+        .all()
+        .map(row => [row.key, row.value])
+    ),
+    records,
+    counts: Object.fromEntries(
+      Object.entries(records).map(([name, rows]) => [name, rows.length])
+    )
+  };
+}
+
+function countWorkspaceRecords(workspaceId) {
+  const directTables = ['memories', 'entities', 'edges', 'agent_stats', 'attestations', 'watched_files'];
+  const counts = Object.fromEntries(directTables.map(table => [
+    table,
+    Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE workspace_id = ?`).get(workspaceId).count)
+  ]));
+
+  counts.provenance = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM provenance p
+    JOIN memories m ON m.id = p.memory_id
+    WHERE m.workspace_id = ?
+  `).get(workspaceId).count);
+  counts.contradictions = Number(db.prepare(`
+    SELECT COUNT(DISTINCT c.id) AS count
+    FROM contradictions c
+    LEFT JOIN memories old_m ON old_m.id = c.old_memory_id
+    LEFT JOIN memories new_m ON new_m.id = c.new_memory_id
+    WHERE old_m.workspace_id = ? OR new_m.workspace_id = ?
+  `).get(workspaceId, workspaceId).count);
+  counts.vectors = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM memories_vec v
+    JOIN memories m ON m.id = v.rowid
+    WHERE m.workspace_id = ?
+  `).get(workspaceId).count);
+
+  return counts;
+}
+
+/**
+ * Permanently remove every record owned by a workspace and verify the result.
+ * This is deliberately not exposed as an agent-callable MCP tool.
+ */
+export function purgeWorkspaceData({ workspaceId = WORKSPACE_ID, vacuum = true } = {}) {
+  if (!workspaceId || typeof workspaceId !== 'string') {
+    throw new Error('A valid workspace ID is required for workspace purge.');
+  }
+
+  const before = countWorkspaceRecords(workspaceId);
+  const memoryIds = db.prepare(
+    'SELECT id FROM memories WHERE workspace_id = ? ORDER BY id ASC'
+  ).all(workspaceId).map(row => row.id);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const deleteVector = db.prepare('DELETE FROM memories_vec WHERE rowid = ?');
+    for (const id of memoryIds) deleteVector.run(id);
+
+    db.prepare(`
+      DELETE FROM contradictions
+      WHERE old_memory_id IN (SELECT id FROM memories WHERE workspace_id = ?)
+         OR new_memory_id IN (SELECT id FROM memories WHERE workspace_id = ?)
+    `).run(workspaceId, workspaceId);
+    db.prepare(`
+      DELETE FROM provenance
+      WHERE memory_id IN (SELECT id FROM memories WHERE workspace_id = ?)
+    `).run(workspaceId);
+    db.prepare('DELETE FROM edges WHERE workspace_id = ?').run(workspaceId);
+    db.prepare('DELETE FROM entities WHERE workspace_id = ?').run(workspaceId);
+    db.prepare('DELETE FROM agent_stats WHERE workspace_id = ?').run(workspaceId);
+    db.prepare('DELETE FROM attestations WHERE workspace_id = ?').run(workspaceId);
+    db.prepare('DELETE FROM watched_files WHERE workspace_id = ?').run(workspaceId);
+    db.prepare('DELETE FROM memories WHERE workspace_id = ?').run(workspaceId);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    throw error;
+  }
+
+  if (DB_PATH !== ':memory:') {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    if (vacuum) db.exec('VACUUM');
+  }
+
+  const after = countWorkspaceRecords(workspaceId);
+  const verified = Object.values(after).every(count => count === 0);
+  if (!verified) {
+    throw new Error(`Workspace purge verification failed: ${JSON.stringify(after)}`);
+  }
+
+  return {
+    workspace_id: workspaceId,
+    purged_at: new Date().toISOString(),
+    secure_delete: db.pragma('secure_delete', { simple: true }) === 1,
+    wal_checkpointed: DB_PATH !== ':memory:',
+    vacuumed: DB_PATH !== ':memory:' && vacuum,
+    before,
+    after,
+    verified
+  };
 }
 
 // ============================================================
@@ -1229,13 +1864,13 @@ export function upsertWatchPosition(filePath, position) {
  */
 export function archiveExpiredMemories() {
   try {
-    const info = stmts.archiveExpiredTransientMemories.run();
+    const info = stmts.archiveExpiredTransientMemories.run(WORKSPACE_ID);
     if (info.changes > 0) {
-      console.error(`[persyst] Archived ${info.changes} expired transient memories (Note/Reminder older than 14 days).`);
+      console.error(`[scopekeep] Archived ${info.changes} expired transient memories (Note/Reminder older than 14 days).`);
     }
     return info.changes;
   } catch (e) {
-    console.error(`[persyst] Failed to archive expired memories: ${e.message}`);
+    console.error(`[scopekeep] Failed to archive expired memories: ${e.message}`);
     return 0;
   }
 }
@@ -1245,7 +1880,7 @@ export function archiveExpiredMemories() {
  */
 export function closeDatabase() {
   db.close();
-  console.error('[persyst] Database closed');
+  console.error('[scopekeep] Database closed');
 }
 
 // Run auto-expiry cleanup on database startup to prune transient bloat immediately

@@ -1,5 +1,16 @@
 import http from 'http';
-import net from 'net';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+function readDefaultGatewayToken() {
+  const tokenPath = process.env.PERSYST_TOKEN_FILE || join(homedir(), '.persyst', 'gateway-token');
+  try {
+    return existsSync(tokenPath) ? readFileSync(tokenPath, 'utf8').trim() : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /**
  * Persyst Developer SDK Client
@@ -17,7 +28,7 @@ export class Persyst {
     this.mode = config.mode || null;
     this.host = config.host || '127.0.0.1';
     this.port = config.port || 4321;
-    this.apiKey = config.apiKey || null;
+    this.apiKey = config.apiKey || process.env.PERSYST_API_KEY || readDefaultGatewayToken();
     this._detectedMode = null;
   }
 
@@ -34,24 +45,26 @@ export class Persyst {
     }
 
     try {
-      const isReachable = await new Promise((resolve) => {
-        const socket = new net.Socket();
-        socket.setTimeout(150); // 150ms probe timeout
-        socket.on('connect', () => {
-          socket.destroy();
-          resolve(true);
+      const isPersyst = await new Promise((resolve) => {
+        const req = http.get({ hostname: this.host, port: this.port, path: '/health', timeout: 500 }, (res) => {
+          let body = '';
+          res.on('data', chunk => { body += chunk; });
+          res.on('end', () => {
+            try {
+              const health = JSON.parse(body);
+              resolve(
+                res.statusCode === 200 &&
+                (health.service === 'scopekeep' || health.service === 'persyst-mcp')
+              );
+            } catch (_) {
+              resolve(false);
+            }
+          });
         });
-        socket.on('error', () => {
-          socket.destroy();
-          resolve(false);
-        });
-        socket.on('timeout', () => {
-          socket.destroy();
-          resolve(false);
-        });
-        socket.connect(this.port, this.host);
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
       });
-      this._detectedMode = isReachable ? 'gateway' : 'library';
+      this._detectedMode = isPersyst ? 'gateway' : 'library';
     } catch (_) {
       this._detectedMode = 'library';
     }
@@ -131,14 +144,20 @@ export class Persyst {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
+          'Content-Length': Buffer.byteLength(body),
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
         }
       }, (res) => {
         let responseBody = '';
         res.on('data', chunk => { responseBody += chunk; });
         res.on('end', () => {
           try {
-            resolve(JSON.parse(responseBody));
+            const parsed = JSON.parse(responseBody);
+            if ((res.statusCode || 500) >= 400) {
+              reject(new Error(parsed.error || `Gateway request failed with HTTP ${res.statusCode}`));
+              return;
+            }
+            resolve(parsed);
           } catch (e) {
             reject(new Error(`Failed to parse gateway response: ${e.message}`));
           }
@@ -197,14 +216,20 @@ export class Persyst {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
+          'Content-Length': Buffer.byteLength(body),
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
         }
       }, (res) => {
         let responseBody = '';
         res.on('data', chunk => { responseBody += chunk; });
         res.on('end', () => {
           try {
-            resolve(JSON.parse(responseBody));
+            const parsed = JSON.parse(responseBody);
+            if ((res.statusCode || 500) >= 400) {
+              reject(new Error(parsed.error || `Gateway request failed with HTTP ${res.statusCode}`));
+              return;
+            }
+            resolve(parsed);
           } catch (e) {
             reject(new Error(`Failed to parse gateway response: ${e.message}`));
           }
@@ -216,3 +241,9 @@ export class Persyst {
     });
   }
 }
+
+/**
+ * Preferred ScopeKeep-branded SDK export. `Persyst` remains available for
+ * backward compatibility with integrations built before ScopeKeep 3.
+ */
+export class ScopeKeep extends Persyst {}

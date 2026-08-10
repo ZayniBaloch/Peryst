@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Persyst | Premium Local-first Memory for AI Coding Agents</title>
-  <meta name="description" content="A local-first, zero-egress SQLite-based MCP memory server that gives coding agents persistent context across sessions. Features hybrid search, cryptographic attestations, and graph hopping.">
+  <title>ScopeKeep | Governed Memory & Context for AI Coding Teams</title>
+  <meta name="description" content="Governed, project-scoped memory and context platform for AI coding teams. Features hybrid local search, workspace isolation, secret scanning, and cryptographic attestations.">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,12 +21,12 @@
     <div class="nav-container">
       <a href="/" class="logo">
         <i data-feather="database" class="logo-icon"></i>
-        <span>Persyst</span>
+        <span>ScopeKeep</span>
       </a>
       <div class="nav-links">
         <a href="#benchmarks">Benchmarks</a>
         <a href="#features">Features</a>
-        <a href="#why-persyst">Why Persyst?</a>
+        <a href="#why-persyst">Why ScopeKeep?</a>
         <a href="#terminal-sandbox">Interactive Sandbox</a>
         <a href="#getting-started">Setup</a>
         <a href="#developer-sdk">Developer SDK &amp; API</a>
@@ -44,16 +44,16 @@
     <!-- Hero Section -->
     <section class="hero">
       <div class="container hero-content">
-        <div class="badge trust-badge">v2.2.6 &middot; SOC 2 &middot; HIPAA &middot; EU AI Act &middot; Zero Egress</div>
+        <div class="badge trust-badge">v2.3.0 &middot; SOC 2 &middot; HIPAA &middot; EU AI Act &middot; Zero Egress</div>
         <h1>The AI Memory System That Passes Your <span>Compliance Audit.</span></h1>
         <p class="subtitle" style="margin-bottom: 2rem;">
-          Your AI coding assistant (Cursor, Claude Code, Aider, Continue.dev) forgets everything when the session ends. Persyst remembers — and leaves a cryptographic audit trail proving what the AI knew and when, operating 100% locally with zero cloud egress.
+          Your AI coding assistant (Cursor, Claude Code, Aider, Continue.dev) forgets everything when the session ends. ScopeKeep stores and retrieves project memory locally and records what context it returned. Your MCP client may still send retrieved context to its configured model provider.
         </p>
         
         <div class="cta-group" style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
           <div class="install-box" style="margin-bottom: 0;">
             <span class="prompt">$</span>
-            <code id="npm-command">npx persyst-mcp init --mcp cursor</code>
+            <code id="npm-command">npx scopekeep init --mcp cursor</code>
             <button id="copy-btn" aria-label="Copy command">
               <i data-feather="copy" class="icon-sm"></i>
             </button>
@@ -79,13 +79,13 @@
             <span style="width: 10px; height: 10px; background: #eab308; border-radius: 50%;"></span>
             <span style="width: 10px; height: 10px; background: #22c55e; border-radius: 50%;"></span>
           </div>
-          <div style="color: var(--text-secondary);">$ npx persyst-mcp init --mcp cursor</div>
+          <div style="color: var(--text-secondary);">$ npx scopekeep init --mcp cursor</div>
           <div style="color: #10b981; margin-top: 0.25rem;">✓ Cursor MCP configuration written successfully.</div>
           <div style="color: #10b981;">✓ Local bi-temporal database initialized at ~/.persyst/persyst.db</div>
           <div style="color: #10b981;">✓ Secure Ed25519 keypair generated and stored.</div>
           <div style="color: #10b981;">✓ File watcher activated on project transcripts.</div>
-          <div style="color: #ffb300; margin-top: 0.5rem; font-weight: bold;">[SECURE] Persyst MCP daemon is running. Your AI now has memory.</div>
-          <div style="color: var(--text-secondary); margin-top: 0.25rem;">No cloud telemetry. Zero external egress.</div>
+          <div style="color: #ffb300; margin-top: 0.5rem; font-weight: bold;">[SECURE] ScopeKeep MCP daemon is running. Your AI now has memory.</div>
+          <div style="color: var(--text-secondary); margin-top: 0.25rem;">No ScopeKeep cloud sync. Model-provider handling remains separate.</div>
         </div>
 
         <!-- Cryptographic Attestation Flow Diagram -->
@@ -120,7 +120,7 @@
         <div class="metrics" style="margin-top: 3.5rem;">
           <div class="metric-card">
             <span class="metric-value" style="font-size: 1.15rem; font-weight: 700; color: var(--accent-indigo);">Zero Egress</span>
-            <span class="metric-label">100% Local / Offline</span>
+            <span class="metric-label">Local Storage &amp; Embeddings</span>
           </div>
           <div class="metric-card">
             <span class="metric-value" style="font-size: 1.15rem; font-weight: 700; color: var(--accent-indigo);">SOC 2</span>
@@ -128,7 +128,7 @@
           </div>
           <div class="metric-card">
             <span class="metric-value" style="font-size: 1.15rem; font-weight: 700; color: var(--accent-indigo);">HIPAA §164.312</span>
-            <span class="metric-label">No BAA Needed</span>
+            <span class="metric-label">Deployment Review Required</span>
           </div>
           <div class="metric-card">
             <span class="metric-value" style="font-size: 1.15rem; font-weight: 700; color: var(--accent-indigo);">EU AI Act</span>
@@ -160,7 +160,7 @@
           </div>
         </div>
         <p class="section-desc" style="margin-top: 3rem; font-size: 1.1rem; color: var(--text-primary); max-width: 750px; margin-left: auto; margin-right: auto; line-height: 1.6;">
-          If your compliance officer asks, <strong>"How do you audit what coding context the AI assistant recommended?"</strong>, Persyst is the only local-first memory tool with an answer.
+          If your compliance officer asks, <strong>"How do you audit what coding context the AI assistant recommended?"</strong>, ScopeKeep is the only local-first memory tool with an answer.
         </p>
       </div>
     </section>
@@ -170,7 +170,7 @@
       <div class="container" style="max-width: 900px; text-align: center;">
         <h2 class="section-title">System <span>Architecture</span></h2>
         <p class="section-desc" style="max-width: 700px; margin: 0 auto 2.5rem auto;">
-          Persyst runs entirely offline as an MCP server on your local machine, monitoring files and managing data with complete compliance safety.
+          ScopeKeep runs entirely offline as an MCP server on your local machine, monitoring files and managing data with complete compliance safety.
         </p>
         <div class="architecture-flow" style="display: flex; align-items: center; justify-content: center; gap: 1.5rem; flex-wrap: wrap; padding: 2.5rem; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border-color); box-shadow: 0 4px 20px rgba(0,0,0,0.15); max-width: 820px; margin: 0 auto;">
           <div class="arch-box" style="background: var(--surface-color); border: 2px solid var(--border-color); padding: 1.5rem 2rem; border-radius: 8px; text-align: center; min-width: 180px; box-shadow: var(--shadow-sm);">
@@ -179,7 +179,7 @@
           </div>
           <div class="arch-arrow" style="font-size: 1.75rem; color: var(--accent-indigo); font-weight: 300;">➔</div>
           <div class="arch-box arch-highlight" style="background: var(--accent-indigo-glow); border: 2px solid var(--accent-indigo); padding: 1.5rem 2rem; border-radius: 8px; text-align: center; min-width: 220px; transform: scale(1.05); box-shadow: 0 0 15px rgba(99, 102, 241, 0.15);">
-            <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem;">Persyst MCP Daemon</div>
+            <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem;">ScopeKeep MCP Daemon</div>
             <div style="font-size: 0.8rem; color: var(--text-secondary); font-family: var(--font-mono); line-height: 1.4;">redactSecrets ➔ embed ➔ search ➔ attest</div>
           </div>
           <div class="arch-arrow" style="font-size: 1.75rem; color: var(--accent-indigo); font-weight: 300;">➔</div>
@@ -194,32 +194,27 @@
     <!-- Production Stress Benchmarks Section -->
     <section id="benchmarks" class="benchmarks-section" style="padding: 5rem 0; border-top: 1px solid var(--border-color); background: var(--bg-secondary);">
       <div class="container" style="max-width: 900px; text-align: center;">
-        <div class="badge trust-badge" style="margin-bottom: 1rem;">Empirical Proof &middot; Stress Tested</div>
-        <h2 class="section-title">Production <span>Stress Benchmarks</span></h2>
+        <div class="badge trust-badge" style="margin-bottom: 1rem;">Measured, Not Estimated &middot; Run on Local Hardware</div>
+        <h2 class="section-title">Benchmark <span>Results</span></h2>
         <p class="section-desc" style="max-width: 750px; margin: 0 auto 3rem auto; line-height: 1.6;">
-          Tested under industry-standard vector performance suites used by enterprise AI teams. All tests executed locally on workstations with zero external server dependencies.
+          Results below come from ScopeKeep's repository benchmarks. Local retrieval tests run without cloud dependencies; the end-to-end QA script uses a configured model judge and is reported separately.
         </p>
 
         <div class="benchmark-metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; text-align: center;">
           <div class="metric-card" style="padding: 1.75rem 1rem; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: var(--shadow-sm);">
-            <div style="font-size: 2.2rem; font-weight: 800; color: var(--accent-indigo); line-height: 1.2;">3.42 ms</div>
-            <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">Median Search Latency</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Direct In-Process SQLite (p50)</div>
-          </div>
-          <div class="metric-card" style="padding: 1.75rem 1rem; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: var(--shadow-sm);">
             <div style="font-size: 2.2rem; font-weight: 800; color: #10b981; line-height: 1.2;">100%</div>
-            <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">NIAH Precision</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Needle In A Haystack (200+ noise)</div>
+            <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">Hybrid Retrieval Recall</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">50/50 questions &middot; bench_mem.js</div>
           </div>
           <div class="metric-card" style="padding: 1.75rem 1rem; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: var(--shadow-sm);">
-            <div style="font-size: 2.2rem; font-weight: 800; color: var(--accent-indigo); line-height: 1.2;">0 Locks</div>
-            <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">20-Worker Swarm Load</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">0 SQLITE_BUSY contention errors</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #10b981; line-height: 1.2;">80%</div>
+            <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">End-to-End QA Accuracy</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">12/15 sessions &middot; GPT-4o judge &middot; bench_e2e.mjs</div>
           </div>
           <div class="metric-card" style="padding: 1.75rem 1rem; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: var(--shadow-sm);">
-            <div style="font-size: 2.2rem; font-weight: 800; color: #10b981; line-height: 1.2;">94.5%</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #10b981; line-height: 1.2;">92.6%</div>
             <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;">Token Compression</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">7,500 tokens down to 410 tokens</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">7,500 &rarr; 554 tokens &middot; 23ms &middot; production_stress_suite.js</div>
           </div>
         </div>
 
@@ -227,42 +222,52 @@
           <table class="comparison-table" style="margin: 0; width: 100%;">
             <thead>
               <tr style="background: var(--bg-secondary);">
-                <th style="text-align: left; padding: 1rem 1.5rem;">Benchmark Suite Name</th>
-                <th style="text-align: left; padding: 1rem 1.5rem;">Target Metric</th>
-                <th style="text-align: left; padding: 1rem 1.5rem;">Persyst Measured Result</th>
-                <th style="text-align: left; padding: 1rem 1.5rem;">Verification Status</th>
+                <th style="text-align: left; padding: 1rem 1.5rem;">Benchmark</th>
+                <th style="text-align: left; padding: 1rem 1.5rem;">What It Measures</th>
+                <th style="text-align: left; padding: 1rem 1.5rem;">Measured Result</th>
+                <th style="text-align: left; padding: 1rem 1.5rem;">Status</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Needle In A Haystack (NIAH)</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Query recall accuracy in 200+ noisy turns</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">100% Precision (Target fact retrieved)</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">PASSED ✓</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Hybrid Recall@50 (bench_mem.js)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Target fact found in top-50 results, 50 diverse questions</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">100% (50/50)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">VERIFIED ✓</td>
               </tr>
               <tr>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Multi-Turn Contradiction Resolution</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Active truth preservation vs obsolete rules</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">Superseded state archived automatically</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">PASSED ✓</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Vector-Only Recall@50 (bench_mem.js)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Semantic-only retrieval without keyword matching</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">96% (48/50)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">VERIFIED ✓</td>
               </tr>
               <tr>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Swarm Concurrency Load Burst</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">20 parallel workers, simultaneous R/W ops</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">63 ops/sec throughput, 0 lock errors</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">PASSED ✓</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">End-to-End QA Accuracy (bench_e2e.mjs)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Full pipeline: retrieve → answer → judge with GPT-4o</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">80% (12/15 sessions)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">VERIFIED ✓</td>
+              </tr>
+<tr>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Token Compression (production_stress_suite.js)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Context window optimization via graph-hopping</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">92.6% reduction &middot; 7,500 → 554 tokens &middot; 23ms</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">VERIFIED ✓</td>
               </tr>
               <tr>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Context Token Compression Ratio</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Graph-hopping context optimization</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">94.5% Reduction (62ms compile time)</td>
-                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">PASSED ✓</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-weight: 600;">Updated-Fact Ranking (benchmark_longmemeval.js)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: var(--text-secondary);">Synthetic regression for ranking a newer fact above an older fact</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; font-family: var(--font-mono); font-weight: 600; color: var(--accent-indigo);">Pass (local regression)</td>
+                <td style="text-align: left; padding: 1rem 1.5rem; color: #10b981; font-weight: 600;">VERIFIED ✓</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p style="margin-top: 1.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+          Run <code>node bench_mem.js</code>, <code>node bench_e2e.mjs</code>, <code>node test/benchmark_longmemeval.js</code>, and <code>node test/production_stress_suite.js</code> to reproduce the repository tests. These are not official LongMemEval or LoCoMo evaluations.
+        </p>
       </div>
     </section>
+
 
     <!-- Features Section -->
     <section id="features" class="features-section">
@@ -284,8 +289,26 @@
               <div class="feature-icon icon-terracotta"><i data-feather="shield"></i></div>
               <span class="tech-tag">Zero Cloud Egress</span>
             </div>
-            <h3>100% Local (HIPAA &amp; SOC 2)</h3>
+            <h3>Local Processing Controls</h3>
             <p>Decentralized SQLite database and local ONNX embeddings ensure absolute privacy. Satisfies strict data residency/confidentiality mandates without a BAA.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-header">
+              <div class="feature-icon icon-amber"><i data-feather="terminal"></i></div>
+              <span class="tech-tag">state.vscdb Ingestion</span>
+            </div>
+            <h3>Native VS Code &amp; Cursor Watching</h3>
+            <p>Directly watches local VS Code and Cursor SQLite databases (<code>state.vscdb</code>), capturing chat history and developer preferences in real time.</p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-header">
+              <div class="feature-icon icon-terracotta"><i data-feather="zap"></i></div>
+              <span class="tech-tag">On-Device Compression</span>
+            </div>
+            <h3>Extractive Local Summarizer</h3>
+            <p>Compresses technical memory records by up to ~75% on-device, reducing prompt context overhead without relying on external cloud APIs.</p>
           </div>
 
           <div class="feature-card">
@@ -396,9 +419,9 @@
             <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.4;">Best for general developers wanting managed cloud servers, simple setup, and general-purpose agent interactions.</p>
           </div>
           <div class="choose-card" style="padding: 1.5rem; border: 2px solid var(--accent-indigo); border-radius: 8px; background: var(--accent-indigo-glow);">
-            <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-indigo);">If you need compliance-grade local memory</h4>
-            <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">Persyst <span style="font-size: 0.9rem; font-weight: normal; color: var(--accent-indigo);">($0 / Free Core)</span></div>
-            <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.4;">Best for regulated industries requiring 100% data privacy, local vector storage, and tamper-proof cryptographic audit trails.</p>
+            <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--accent-indigo);">If you need governed local memory</h4>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">ScopeKeep <span style="font-size: 0.9rem; font-weight: normal; color: var(--accent-indigo);">($0 / Free Core)</span></div>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.4;">Best for teams that need local vector storage, explicit workspace boundaries, and tamper-evident retrieval records.</p>
           </div>
         </div>
         <div class="comparison-container">
@@ -407,14 +430,14 @@
               <tr>
                 <th>Capabilities</th>
                 <th>Mem0</th>
-                <th class="highlight">Persyst</th>
+                <th class="highlight">ScopeKeep</th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td><strong>Deployment Mode</strong></td>
                 <td>Cloud-first</td>
-                <td class="highlight-cell"><i data-feather="shield" class="check-inline"></i> Local-first (100% Offline)</td>
+                <td class="highlight-cell"><i data-feather="shield" class="check-inline"></i> Local-first storage and retrieval</td>
               </tr>
               <tr>
                 <td><strong>Cryptographic Attestation</strong></td>
@@ -452,7 +475,7 @@
       <div class="container" style="text-align: center;">
         <h2 class="section-title">Ready for <span>Enterprise Audits</span></h2>
         <p class="section-desc" style="max-width: 700px; margin: 0 auto 2.5rem auto;">
-          Persyst provides standard mapping guides for security reviews, legal evaluations, and developer operations under SOC 2, HIPAA, and the EU AI Act.
+          ScopeKeep provides standard mapping guides for security reviews, legal evaluations, and developer operations under SOC 2, HIPAA, and the EU AI Act.
         </p>
         <div class="btn-row" style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
           <a href="https://github.com/ZayniBaloch/Peryst/blob/master/compliance/SOC2-controls.md" target="_blank" class="btn-outline" style="font-size: 0.9rem; padding: 0.6rem 1.2rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); background: var(--surface-color);">
@@ -474,8 +497,8 @@
     <!-- Interactive Code Sandbox Section -->
     <section id="terminal-sandbox" class="sandbox-section">
       <div class="container">
-        <h2 class="section-title">See Persyst <span>In Action</span></h2>
-        <p class="section-desc">Interact with the tabs below to inspect how Persyst logs and verifies memory operations in real time.</p>
+        <h2 class="section-title">See ScopeKeep <span>In Action</span></h2>
+        <p class="section-desc">Interact with the tabs below to inspect how ScopeKeep logs and verifies memory operations in real time.</p>
         
         <div class="sandbox-layout">
           <div class="sandbox-menu">
@@ -506,7 +529,7 @@
                 <div class="line comment">// Export cryptographic audit trail as markdown</div>
                 <div class="line json-req"><span class="terminal-kw">GET</span> /compliance/export?format=markdown</div>
                 <div class="line mt-1 system">System: Querying attestation ledger and verifying chain signatures... (12ms)</div>
-                <div class="line text-body" style="color: #f1f5f9; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.85rem;"># Persyst Cryptographic Compliance Export
+                <div class="line text-body" style="color: #f1f5f9; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.85rem;"># ScopeKeep Cryptographic Compliance Export
 
 Exported at: `2026-06-26T20:00:00.000Z`
 Period: `0000-01-01T00:00:00.000Z` to `2026-06-26T20:00:00.000Z`
@@ -608,7 +631,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
         <div class="main-install-cta" style="max-width: 650px; margin: 0 auto 3rem auto; text-align: center; border: 1px solid var(--border-color); border-radius: 12px; padding: 2.5rem; background: var(--bg-secondary); box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
           <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary);">Install and configure Cursor automatically:</h3>
           <div class="code-wrapper" style="max-width: 450px; margin: 1.5rem auto 1.5rem auto;">
-            <pre><code id="code-main-install">npx persyst-mcp init --mcp cursor</code></pre>
+            <pre><code id="code-main-install">npx scopekeep init --mcp cursor</code></pre>
             <button class="copy-code-btn" data-clipboard="code-main-install" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.5; margin: 0;">
@@ -619,7 +642,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
         <div class="note-integration" style="max-width: 650px; margin: 0 auto 3rem auto; text-align: left; border-left: 4px solid var(--accent-pink); padding: 1.25rem 1.5rem; background: var(--bg-secondary); border-radius: 6px; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
           <strong style="color: var(--text-primary); display: block; margin-bottom: 0.5rem;"><i data-feather="alert-triangle" class="icon-sm" style="vertical-align: text-bottom; margin-right: 6px; color: var(--accent-pink);"></i> Note on Active Retrieval:</strong>
           <span style="color: var(--text-secondary); font-size: 0.88rem; line-height: 1.55; display: block;">
-            Persyst has two modes: <strong>Passive Recording</strong> (the watcher automatically extracts and saves memories from your conversations in the background) and <strong>Active Retrieval</strong> (your agent calls <code>search_memories</code> or <code>get_optimized_context</code> to fetch context). The IDE does not automatically inject memories into prompts unless configured to do so via workspace rules (e.g. <code>.cursorrules</code>, <code>.windsurfrules</code>, <code>.agents/AGENTS.md</code>) or custom system prompt configurations.
+            ScopeKeep has two modes: <strong>Passive Recording</strong> (the watcher automatically extracts and saves memories from your conversations in the background) and <strong>Active Retrieval</strong> (your agent calls <code>search_memories</code> or <code>get_optimized_context</code> to fetch context). The IDE does not automatically inject memories into prompts unless configured to do so via workspace rules (e.g. <code>.cursorrules</code>, <code>.windsurfrules</code>, <code>.agents/AGENTS.md</code>) or custom system prompt configurations.
           </span>
         </div>
 
@@ -642,7 +665,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
                 <div id="tab-claude" class="tab-pane active">
                   <p class="config-desc">Install automatic pre-prompt memory injection hooks with one command:</p>
                   <div class="code-wrapper">
-                    <pre><code id="code-claude">npx persyst-mcp setup</code></pre>
+                    <pre><code id="code-claude">npx scopekeep setup</code></pre>
                     <button class="copy-code-btn" data-clipboard="code-claude" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
                   </div>
                   <p class="config-desc" style="margin-top: 1.5rem;">This configures Claude Code's <code>~/.claude/settings.json</code> to load your memory on startup and retrieve context automatically on every prompt.</p>
@@ -657,12 +680,12 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
                       <li>Click <strong>+ Add New MCP Server</strong></li>
                       <li>Set Name to <code>persyst</code></li>
                       <li>Set Type to <code>stdio</code></li>
-                      <li>Set Command to <code>npx -y persyst-mcp</code></li>
+                      <li>Set Command to <code>npx -y scopekeep</code></li>
                     </ol>
                   </div>
                   <p class="config-desc" style="margin-top: 1.5rem;">2. Initialize automatic workspace memory rules:</p>
                   <div class="code-wrapper">
-                    <pre><code id="code-cursor">npx persyst-mcp init</code></pre>
+                    <pre><code id="code-cursor">npx scopekeep init</code></pre>
                     <button class="copy-code-btn" data-clipboard="code-cursor" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
                   </div>
                   <p class="config-desc" style="margin-top: 0.5rem;">This creates a <code>.cursorrules</code> file that instructs the agent to automatically query memory and record milestones.</p>
@@ -677,7 +700,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
   "mcpServers": {
     "persyst": {
       "command": "npx",
-      "args": ["-y", "persyst-mcp"]
+      "args": ["-y", "scopekeep"]
     }
   }
 }</code></pre>
@@ -686,7 +709,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
 
                   <h4 style="margin-top: 2rem; margin-bottom: 0.75rem; font-size: 1.05rem; font-weight: 600; color: var(--text-primary);">Configure Workspace Rules &amp; Swarm Settings:</h4>
                   <div class="code-wrapper">
-                    <pre><code id="code-vscode-rules">npx persyst-mcp init</code></pre>
+                    <pre><code id="code-vscode-rules">npx scopekeep init</code></pre>
                     <button class="copy-code-btn" data-clipboard="code-vscode-rules" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
                   </div>
                   <p class="config-desc" style="margin-top: 0.5rem;">This creates a <code>.persystrules.md</code> file that teaches your agent how to query and store memories. To enable <strong>agentic swarm isolation</strong>, instruct your agents to pass their unique agent name as <code>agent_id</code> and set <code>shared: false</code> for private memories.</p>
@@ -696,22 +719,22 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
                 <div id="tab-aider" class="tab-pane">
                   <p class="config-desc">Run Aider with the automatic memory-injection wrapper:</p>
                   <div class="code-wrapper">
-                    <pre><code id="code-aider">npx persyst-mcp aider --model anthropic/claude-3-5-sonnet</code></pre>
+                    <pre><code id="code-aider">npx scopekeep aider --model anthropic/claude-3-5-sonnet</code></pre>
                     <button class="copy-code-btn" data-clipboard="code-aider" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
                   </div>
-                  <p class="config-desc" style="margin-top: 1.5rem;">This spawns Aider, automatically connects to Persyst, ingests git history, and injects relevant memories into your prompt inputs.</p>
-                  <div class="note">Alternatively, run standard Aider with standard MCP: <code>aider --mcp-server persyst:npx -y persyst-mcp</code></div>
+                  <p class="config-desc" style="margin-top: 1.5rem;">This spawns Aider, automatically connects to ScopeKeep, ingests git history, and injects relevant memories into your prompt inputs.</p>
+                  <div class="note">Alternatively, run standard Aider with standard MCP: <code>aider --mcp-server persyst:npx -y scopekeep</code></div>
                 </div>
 
                 <!-- Antigravity Pane -->
                 <div id="tab-antigravity" class="tab-pane">
-                  <p class="config-desc">1. Add Persyst to your Antigravity agent configuration file at <code>~/.gemini/antigravity/mcp_config.json</code>:</p>
+                  <p class="config-desc">1. Add ScopeKeep to your Antigravity agent configuration file at <code>~/.gemini/antigravity/mcp_config.json</code>:</p>
                   <div class="code-wrapper">
                     <pre><code id="code-anti">{
   "mcpServers": {
     "persyst": {
       "command": "npx",
-      "args": ["-y", "persyst-mcp"]
+      "args": ["-y", "scopekeep"]
     }
   }
 }</code></pre>
@@ -719,7 +742,7 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
                   </div>
                   <p class="config-desc" style="margin-top: 1.5rem;">2. Generate system rules files for the workspace:</p>
                   <div class="code-wrapper">
-                    <pre><code id="code-anti-rules">npx persyst-mcp init</code></pre>
+                    <pre><code id="code-anti-rules">npx scopekeep init</code></pre>
                     <button class="copy-code-btn" data-clipboard="code-anti-rules" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
                   </div>
                 </div>
@@ -746,21 +769,21 @@ System cryptographic status: <strong class="secure-glow" style="color: #10b981; 
             <div id="sdk-tab-js" class="sdk-tab-pane active">
               <p class="config-desc">Install the package locally in your project:</p>
               <div class="code-wrapper">
-                <pre><code id="code-sdk-install">npm install persyst-mcp</code></pre>
+                <pre><code id="code-sdk-install">npm install scopekeep</code></pre>
                 <button class="copy-code-btn" data-clipboard="code-sdk-install" aria-label="Copy code"><i data-feather="copy" class="icon-sm"></i></button>
               </div>
               
               <p class="config-desc" style="margin-top: 1.5rem;">Initialize the SDK in <strong>Library Mode</strong> (runs local SQLite-vec engine offline) or <strong>Gateway Mode</strong> (connects to running HTTP gateway):</p>
               <div class="code-wrapper">
-                <pre><code id="code-sdk-usage">import { Persyst } from 'persyst-mcp/sdk';
+                <pre><code id="code-sdk-usage">import { ScopeKeep } from 'scopekeep/sdk';
 
 // 1. Library Mode (Offline Direct SQLite Access)
-const sdk = new Persyst({
+const sdk = new ScopeKeep({
   mode: 'library'
 });
 
 // 2. Gateway Mode (Connect to HTTP Server)
-const sdk = new Persyst({
+const sdk = new ScopeKeep({
   mode: 'gateway',
   host: '127.0.0.1',
   port: 4321
@@ -832,16 +855,16 @@ console.log(context);</code></pre>
     <div class="container footer-container" style="display: flex; flex-direction: column; align-items: center; gap: 1.5rem; padding: 2rem 0;">
       <div class="footer-brand">
         <i data-feather="database" class="logo-icon"></i>
-        <span>Persyst</span>
+        <span>ScopeKeep</span>
       </div>
       <div class="footer-links" style="display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center;">
         <a href="#getting-started">Documentation</a>
         <a href="https://github.com/ZayniBaloch/Peryst/tree/master/compliance" target="_blank">Compliance Guides</a>
         <a href="https://github.com/ZayniBaloch/Peryst" target="_blank">GitHub</a>
-        <a href="https://www.npmjs.com/package/persyst-mcp" target="_blank">npm Registry</a>
+        <a href="https://www.npmjs.com/package/scopekeep" target="_blank">npm Registry</a>
       </div>
       <div class="footer-copy" style="color: var(--text-secondary); font-size: 0.85rem; text-align: center;">
-        &copy; 2026 Persyst. Local-first AI memory for regulated teams. &middot; <a href="https://github.com/ZayniBaloch/Peryst/blob/master/LICENSE" target="_blank" class="footer-license-link">MIT License</a>
+        &copy; 2026 ScopeKeep. Local-first AI memory for regulated teams. &middot; <a href="https://github.com/ZayniBaloch/Peryst/blob/master/LICENSE" target="_blank" class="footer-license-link">MIT License</a>
       </div>
     </div>
   </footer>

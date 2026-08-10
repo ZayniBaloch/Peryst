@@ -1,5 +1,5 @@
 /**
- * watcher.js — Persyst Automatic Log Watcher Daemon
+ * watcher.js — ScopeKeep Automatic Log Watcher Daemon
  * 
  * Periodically scans configured log directories for coding agents (Antigravity, Roo-Code, etc.),
  * reads new appends/messages from transcripts, runs heuristics to extract high-value memories,
@@ -9,6 +9,8 @@
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { createHash } from 'crypto';
+import Database from 'better-sqlite3-multiple-ciphers';
 import {
   getWatchPosition,
   upsertWatchPosition,
@@ -25,46 +27,26 @@ import { memoryEventBus } from './events.js';
 import { logInfo } from './text-utils.js';
 import chokidar from 'chokidar';
 
-// Config path: ~/.persyst/config.json (overridable for tests)
-const CONFIG_FILE = process.env.PERSYST_CONFIG_FILE || join(homedir(), '.persyst', 'config.json');
+// Config path: ~/.scopekeep/config.json (overridable for tests)
+const CONFIG_FILE = process.env.SCOPEKEEP_CONFIG_FILE || process.env.PERSYST_CONFIG_FILE || join(homedir(), '.scopekeep', 'config.json');
 
 let chokidarWatcher = null;
 const DEDUP_THRESHOLD = 0.80;
+const seenLineHashes = new Set();
 
 /**
  * Load configured directories to watch. Generates a default config if missing.
  * @returns {Array<string>} List of directory paths to scan
  */
 export function loadWatchedDirs() {
-  const defaultDirs = [
-    join(homedir(), '.gemini', 'antigravity-ide', 'brain').replace(/\\/g, '/')
-  ];
-
-  // Also probe standard paths for Cline / Roo Code
-  const platform = process.platform;
-  if (platform === 'win32') {
-    const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
-    const rooPath = join(appData, 'Roo-Code', 'tasks').replace(/\\/g, '/');
-    if (existsSync(rooPath)) defaultDirs.push(rooPath);
-    const clinePath = join(appData, 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks').replace(/\\/g, '/');
-    if (existsSync(clinePath)) defaultDirs.push(clinePath);
-  } else if (platform === 'darwin') {
-    const rooPath = join(homedir(), 'Library', 'Application Support', 'Roo-Code', 'tasks');
-    if (existsSync(rooPath)) defaultDirs.push(rooPath);
-    const clinePath = join(homedir(), 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks');
-    if (existsSync(clinePath)) defaultDirs.push(clinePath);
-  } else {
-    const rooPath = join(homedir(), '.config', 'Roo-Code', 'tasks');
-    if (existsSync(rooPath)) defaultDirs.push(rooPath);
-    const clinePath = join(homedir(), '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks');
-    if (existsSync(clinePath)) defaultDirs.push(clinePath);
-  }
-
   try {
     if (existsSync(CONFIG_FILE)) {
       const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
-      if (Array.isArray(config.watch_dirs)) {
-        return config.watch_dirs;
+      const explicitlyEnabled = config.capture_enabled === true || process.env.NODE_ENV === 'test';
+      if (explicitlyEnabled && Array.isArray(config.watch_dirs)) {
+        return config.watch_dirs
+          .filter(dir => typeof dir === 'string' && dir.trim().length > 0)
+          .map(dir => resolve(dir));
       }
     }
   } catch (_) {
@@ -73,10 +55,10 @@ export function loadWatchedDirs() {
 
   // Create default config file if it does not exist
   try {
-    writeFileSync(CONFIG_FILE, JSON.stringify({ watch_dirs: defaultDirs }, null, 2));
+    writeFileSync(CONFIG_FILE, JSON.stringify({ capture_enabled: false, watch_dirs: [] }, null, 2));
   } catch (_) {}
 
-  return defaultDirs;
+  return [];
 }
 
 /**
@@ -128,6 +110,18 @@ async function processJsonlFile(filePath) {
         continue;
       }
 
+      // Check line hash to prevent duplicate parsing if IDE truncates or resets offset
+      const lineHash = createHash('sha256').update(line.trim()).digest('hex');
+      if (seenLineHashes.has(lineHash)) {
+        processedOffset += line.length + 1;
+        continue;
+      }
+      seenLineHashes.add(lineHash);
+      if (seenLineHashes.size > 10000) {
+        const firstKey = seenLineHashes.values().next().value;
+        seenLineHashes.delete(firstKey);
+      }
+
       // Commit the bytes for this line (including the newline that produced the split).
       processedOffset += line.length + 1;
 
@@ -142,17 +136,15 @@ async function processJsonlFile(filePath) {
 
         const facts = extractHeuristic(cleanText);
         for (const fact of facts) {
-          // Verify against exact duplicate (Bug A fix: check namespace 'shared')
-          if (memoryExists(fact.content, 'shared')) continue;
+          const watcherNs = process.env.PERSYST_PROJECT || 'shared';
+          if (memoryExists(fact.content, watcherNs)) continue;
 
-          // Verify against semantic similarity (Bug B fix: check namespace 'shared')
-          const similar = await searchHybrid(fact.content, 1, null, null, 'shared');
+          const similar = await searchHybrid(fact.content, 1, null, null, watcherNs);
           if (similar.length > 0 && parseFloat(similar[0].similarity) >= DEDUP_THRESHOLD) {
             continue;
           }
 
           // Insert memory with provenance (written to project namespace or 'shared')
-          const watcherNs = process.env.PERSYST_PROJECT || 'shared';
           const id = insertMemory(fact.content, fact.confidence, {
             source_type: 'agent',
             source_id: record.source === 'MODEL' ? 'antigravity-worker' : 'user-dialogue',
@@ -163,14 +155,14 @@ async function processJsonlFile(filePath) {
             const embedding = await generateEmbedding(fact.content);
             insertVector(id, embedding);
           } catch (embedErr) {
-            console.error(`[persyst-watcher] Embedding failed for fact #${id}: ${embedErr.message}`);
+            console.error(`[scopekeep-watcher] Embedding failed for fact #${id}: ${embedErr.message}`);
             // Clean up: delete the memory so we don't have orphaned entries
-            try { deleteMemory(id); } catch (_) {}
+            try { deleteMemory(id); } catch (err) { console.error(`[scopekeep-watcher] Cleanup failed for memory #${id}: ${err.message}`); }
             continue;
           }
 
           addedCount++;
-          console.error(`[persyst-watcher] Auto-extracted fact: "${fact.content}" (Memory #${id})`);
+          console.error(`[scopekeep-watcher] Auto-extracted fact: "${fact.content}" (Memory #${id})`);
           memoryEventBus.emit('memory_added', { id, content: fact.content, namespace: watcherNs, source: 'watcher-antigravity' });
         }
       }
@@ -185,7 +177,7 @@ async function processJsonlFile(filePath) {
     upsertWatchPosition(filePath, processedOffset);
     return addedCount;
   } catch (err) {
-    console.error(`[persyst-watcher] Failed to process JSONL file ${filePath}: ${err.message}`);
+    console.error(`[scopekeep-watcher] Failed to process JSONL file ${filePath}: ${err.message}`);
     return 0;
   }
 }
@@ -238,13 +230,13 @@ async function processJsonFile(filePath) {
             const embedding = await generateEmbedding(fact.content);
             insertVector(id, embedding);
           } catch (embedErr) {
-            console.error(`[persyst-watcher] Embedding failed for fact #${id}: ${embedErr.message}`);
+            console.error(`[scopekeep-watcher] Embedding failed for fact #${id}: ${embedErr.message}`);
             try { deleteMemory(id); } catch (_) {}
             continue;
           }
 
           addedCount++;
-          console.error(`[persyst-watcher] Auto-extracted fact: "${fact.content}" (Memory #${id})`);
+          console.error(`[scopekeep-watcher] Auto-extracted fact: "${fact.content}" (Memory #${id})`);
           memoryEventBus.emit('memory_added', { id, content: fact.content, namespace: watcherNs, source: 'watcher-roo' });
         }
       }
@@ -258,7 +250,62 @@ async function processJsonFile(filePath) {
     upsertWatchPosition(filePath, history.length);
     return addedCount;
   } catch (err) {
-    console.error(`[persyst-watcher] Failed to process JSON file ${filePath}: ${err.message}`);
+    console.error(`[scopekeep-watcher] Failed to process JSON file ${filePath}: ${err.message}`);
+    return 0;
+  }
+}
+
+/**
+ * Scan a VS Code state.vscdb SQLite database for Copilot/Chat transcripts.
+ * @param {string} filePath 
+ */
+async function processVscodeVscdb(filePath) {
+  try {
+    let dbVsc;
+    try {
+      dbVsc = new Database(filePath, { readonly: true });
+    } catch (_) {
+      return 0;
+    }
+
+    const rows = dbVsc.prepare("SELECT key, value FROM ItemTable WHERE key LIKE '%chat%' OR key LIKE '%session%' OR key LIKE '%interactive%'").all();
+    dbVsc.close();
+
+    let addedCount = 0;
+    for (const r of rows) {
+      if (!r.value || typeof r.value !== 'string') continue;
+      const lineHash = createHash('sha256').update(r.value).digest('hex');
+      if (seenLineHashes.has(lineHash)) continue;
+      seenLineHashes.add(lineHash);
+
+      const facts = extractHeuristic(r.value);
+      for (const fact of facts) {
+        const watcherNs = process.env.PERSYST_PROJECT || 'shared';
+        if (memoryExists(fact.content, watcherNs)) continue;
+
+        const similar = await searchHybrid(fact.content, 1, null, null, watcherNs);
+        if (similar.length > 0 && parseFloat(similar[0].similarity) >= DEDUP_THRESHOLD) continue;
+
+        const id = insertMemory(fact.content, fact.confidence, {
+          source_type: 'agent',
+          source_id: 'vscode-copilot',
+          confidence: fact.confidence
+        }, watcherNs);
+
+        try {
+          const embedding = await generateEmbedding(fact.content);
+          insertVector(id, embedding);
+        } catch (embedErr) {
+          try { deleteMemory(id); } catch (_) {}
+          continue;
+        }
+
+        addedCount++;
+        memoryEventBus.emit('memory_added', { id, content: fact.content, namespace: watcherNs, source: 'vscode-copilot' });
+      }
+    }
+    return addedCount;
+  } catch (err) {
     return 0;
   }
 }
@@ -320,14 +367,22 @@ export async function scanDirectories() {
   }
 
   // Auto-consolidate memories if new ones were added to keep prompt context slim
-  if (totalAdded > 0) {
+  if (totalAdded > 0 && process.env.PERSYST_AUTO_CONSOLIDATE === '1') {
     try {
-      console.error(`[persyst-watcher] Running automatic memory consolidation sweep...`);
+      console.error(`[scopekeep-watcher] Running automatic memory consolidation sweep...`);
       const { consolidateMemories } = await import('./search.js');
-      const report = await consolidateMemories();
-      console.error(`[persyst-watcher] Auto-consolidation complete: merged ${report.consolidated_groups} duplicate groups.`);
+      const report = await consolidateMemories(process.env.PERSYST_PROJECT || 'shared');
+      console.error(`[scopekeep-watcher] Auto-consolidation complete: merged ${report.consolidated_groups} duplicate groups.`);
     } catch (e) {
-      console.error(`[persyst-watcher] Auto-consolidation failed: ${e.message}`);
+      console.error(`[scopekeep-watcher] Auto-consolidation failed: ${e.message}`);
+    }
+
+    if (process.env.PERSYST_UPDATE_RULES === '1') try {
+      console.error(`[scopekeep-watcher] Updating workspace rule files with fresh context...`);
+      const { updateWorkspaceRules } = await import('./rules-updater.js');
+      await updateWorkspaceRules();
+    } catch (e) {
+      console.error(`[scopekeep-watcher] Rule context update failed: ${e.message}`);
     }
   }
 
@@ -336,7 +391,7 @@ export async function scanDirectories() {
     const { archiveExpiredMemories } = await import('./database.js');
     archiveExpiredMemories();
   } catch (e) {
-    console.error(`[persyst-watcher] Auto-expiry execution failed: ${e.message}`);
+    console.error(`[scopekeep-watcher] Auto-expiry execution failed: ${e.message}`);
   }
 }
 
@@ -344,24 +399,34 @@ export async function scanDirectories() {
  * Handle a file addition or modification event from Chokidar.
  * @param {string} filePath 
  */
-async function handleFileChange(filePath) {
+export async function handleFileChange(filePath) {
   const normalizedPath = filePath.replace(/\\/g, '/');
   let addedCount = 0;
   
-  if (normalizedPath.endsWith('transcript.jsonl')) {
+  if (normalizedPath.endsWith('.vscdb')) {
+    addedCount = await processVscodeVscdb(filePath);
+  } else if (normalizedPath.endsWith('transcript.jsonl')) {
     addedCount = await processJsonlFile(filePath);
   } else if (normalizedPath.endsWith('.json') && normalizedPath.includes('tasks')) {
     addedCount = await processJsonFile(filePath);
   }
 
-  if (addedCount > 0) {
+  if (addedCount > 0 && process.env.PERSYST_AUTO_CONSOLIDATE === '1') {
     try {
-      console.error(`[persyst-watcher] Running automatic memory consolidation sweep...`);
+      console.error(`[scopekeep-watcher] Running automatic memory consolidation sweep...`);
       const { consolidateMemories } = await import('./search.js');
-      const report = await consolidateMemories();
-      console.error(`[persyst-watcher] Auto-consolidation complete: merged ${report.consolidated_groups} duplicate groups.`);
+      const report = await consolidateMemories(process.env.PERSYST_PROJECT || 'shared');
+      console.error(`[scopekeep-watcher] Auto-consolidation complete: merged ${report.consolidated_groups} duplicate groups.`);
     } catch (e) {
-      console.error(`[persyst-watcher] Auto-consolidation failed: ${e.message}`);
+      console.error(`[scopekeep-watcher] Auto-consolidation failed: ${e.message}`);
+    }
+
+    if (process.env.PERSYST_UPDATE_RULES === '1') try {
+      console.error(`[scopekeep-watcher] Updating workspace rule files with fresh context...`);
+      const { updateWorkspaceRules } = await import('./rules-updater.js');
+      await updateWorkspaceRules();
+    } catch (e) {
+      console.error(`[scopekeep-watcher] Rule context update failed: ${e.message}`);
     }
   }
 
@@ -370,8 +435,10 @@ async function handleFileChange(filePath) {
     const { archiveExpiredMemories } = await import('./database.js');
     archiveExpiredMemories();
   } catch (e) {
-    console.error(`[persyst-watcher] Auto-expiry execution failed: ${e.message}`);
+    console.error(`[scopekeep-watcher] Auto-expiry execution failed: ${e.message}`);
   }
+
+  return addedCount;
 }
 
 /**
@@ -379,14 +446,22 @@ async function handleFileChange(filePath) {
  */
 export function startWatcher() {
   if (chokidarWatcher) return;
+  if (process.env.PERSYST_CAPTURE_ENABLED !== '1') {
+    logInfo('[scopekeep-watcher] Capture is disabled; watcher was not started.');
+    return;
+  }
 
-  logInfo('[persyst-watcher] Starting background log watcher daemon (Chokidar)...');
+  logInfo('[scopekeep-watcher] Starting background log watcher daemon (Chokidar)...');
   const watchDirs = loadWatchedDirs();
+  if (watchDirs.length === 0) {
+    logInfo('[scopekeep-watcher] No explicitly configured watch directories.');
+    return;
+  }
 
   // Run initial scan, then start watching
   scanDirectories()
     .catch(err => {
-      console.error(`[persyst-watcher] Initial scan failed: ${err.message}`);
+      console.error(`[scopekeep-watcher] Initial scan failed: ${err.message}`);
     })
     .then(() => {
       if (chokidarWatcher) return;
@@ -401,18 +476,18 @@ export function startWatcher() {
 
       chokidarWatcher.on('add', filePath => {
         handleFileChange(filePath).catch(err => {
-          console.error(`[persyst-watcher] Error handling added file ${filePath}:`, err);
+          console.error(`[scopekeep-watcher] Error handling added file ${filePath}:`, err);
         });
       });
 
       chokidarWatcher.on('change', filePath => {
         handleFileChange(filePath).catch(err => {
-          console.error(`[persyst-watcher] Error handling changed file ${filePath}:`, err);
+          console.error(`[scopekeep-watcher] Error handling changed file ${filePath}:`, err);
         });
       });
 
       chokidarWatcher.on('error', err => {
-        console.error(`[persyst-watcher] Chokidar watcher error: ${err.message}`);
+        console.error(`[scopekeep-watcher] Chokidar watcher error: ${err.message}`);
       });
     });
 }
@@ -424,6 +499,6 @@ export function stopWatcher() {
   if (chokidarWatcher) {
     chokidarWatcher.close().catch(() => {});
     chokidarWatcher = null;
-    logInfo('[persyst-watcher] Background log watcher daemon stopped.');
+    logInfo('[scopekeep-watcher] Background log watcher daemon stopped.');
   }
 }

@@ -15,7 +15,8 @@ import db, {
   boostMemory,
   getProvenance,
   getMemoriesByEntity,
-  getAllEntities
+  getAllEntities,
+  WORKSPACE_ID
 } from './database.js';
 import { generateEmbedding } from './embeddings.js';
 import { createAttestation } from './attestation.js';
@@ -57,17 +58,17 @@ export async function searchHybrid(queryText, limit = 5, agentId = null, session
   const cacheKey = LRUCache.key(`${ns}:${queryText}`, parsedLimit);
   const cached = searchCache.get(cacheKey);
   if (cached) {
-    logInfo(`[persyst-cache] Cache HIT for query: "${queryText.slice(0, 50)}..."`);
+    logInfo(`[scopekeep-cache] Cache HIT for query: "${queryText.slice(0, 50)}..."`);
     return cached;
   }
 
   // --- Step 1: Keyword search (fast, exact matches) ---
-  const keywordHits = searchKeyword(queryText, parsedLimit * 2);
+  const keywordHits = searchKeyword(queryText, parsedLimit * 2, ns);
   const keywordIds = new Set(keywordHits.map(r => r.id));
 
   // --- Step 2: Semantic search (meaning-based) ---
   const queryEmbedding = await generateEmbedding(queryText);
-  const vecHits = searchVector(queryEmbedding, parsedLimit * 2);
+  const vecHits = searchVector(queryEmbedding, parsedLimit * 2, ns);
 
   const semanticResults = vecHits.map(r => ({
     id: Number(r.rowid),
@@ -118,7 +119,7 @@ export async function searchHybrid(queryText, limit = 5, agentId = null, session
       let reputationWarning = false;
       const prov = memory.provenance;
       if (prov && prov.source_type === 'agent' && prov.source_id) {
-        const agentRow = stmts.getReputationScore.get(prov.source_id);
+        const agentRow = stmts.getReputationScore.get(prov.source_id, WORKSPACE_ID);
         if (agentRow) {
           reputationScore = agentRow.reputation_score;
           if (reputationScore < 0.5) {
@@ -133,6 +134,7 @@ export async function searchHybrid(queryText, limit = 5, agentId = null, session
       return {
         id: memory.id,
         content: memory.content,
+        summary: memory.summary || memory.content,
         importance_score: memory.importance_score,
         created_at: memory.created_at,
         last_accessed: memory.last_accessed,
@@ -148,8 +150,11 @@ export async function searchHybrid(queryText, limit = 5, agentId = null, session
   // Sort by final score descending
   finalResults.sort((a, b) => parseFloat(b.hybrid_score) - parseFloat(a.hybrid_score));
 
+  // --- Step 4.5: Query-Time Distinct Semantic Pruning ---
+  const prunedResults = pruneRedundantHits(finalResults, 0.70);
+
   // --- Step 5: Apply MMR for diverse retrieval (Feature 3) ---
-  const mmrResults = applyMMR(finalResults, parsedLimit);
+  const mmrResults = applyMMR(prunedResults, parsedLimit);
 
   // Generate cryptographic attestation for audit trails (skip if called internally)
   let attestation = null;
@@ -162,6 +167,37 @@ export async function searchHybrid(queryText, limit = 5, agentId = null, session
   searchCache.set(cacheKey, mmrResults);
 
   return mmrResults;
+}
+
+/**
+ * Prune redundant candidate search hits using string / semantic similarity overlap threshold.
+ * @param {Array} items
+ * @param {number} threshold - Jaccard similarity threshold (default: 0.70)
+ * @returns {Array} Pruned items
+ */
+function pruneRedundantHits(items, threshold = 0.70) {
+  const pruned = [];
+  for (const item of items) {
+    const textA = (item.summary || item.content).toLowerCase();
+    let isDuplicate = false;
+    for (const kept of pruned) {
+      const textB = (kept.summary || kept.content).toLowerCase();
+      const wordsA = new Set(textA.split(/\s+/));
+      const wordsB = new Set(textB.split(/\s+/));
+      let intersection = 0;
+      for (const w of wordsA) if (wordsB.has(w)) intersection++;
+      const union = wordsA.size + wordsB.size - intersection;
+      const jaccardSim = union > 0 ? (intersection / union) : 0;
+      if (jaccardSim >= threshold) {
+        isDuplicate = true;
+        break;
+      }
+    }
+    if (!isDuplicate) {
+      pruned.push(item);
+    }
+  }
+  return pruned;
 }
 
 /**
@@ -245,8 +281,8 @@ export async function getOptimizedContext(queryText, maxTokens, agentId = null, 
     }
   }
 
-  // 1. Run hybrid search to fetch top 5 memories as seeds (skip attestation to avoid double-write)
-  const searchHits = await searchHybrid(queryText, 5, agentId, sessionId, namespace, true);
+  // 1. Run hybrid search to fetch top 20 memories as seeds (skip attestation to avoid double-write)
+  const searchHits = await searchHybrid(queryText, 20, agentId, sessionId, namespace, true);
   const candidates = new Map();
 
   for (const hit of searchHits) {
@@ -290,7 +326,7 @@ export async function getOptimizedContext(queryText, maxTokens, agentId = null, 
     if (depth >= 6) continue;
 
     // --- 2a. Explicit Graph Edges (from edges table) ---
-    const connectedEdges = stmts.getEdgesBySourceAndType.all(id, type, id, type);
+    const connectedEdges = stmts.getEdgesBySourceAndType.all(WORKSPACE_ID, id, type, id, type);
 
     for (const edge of connectedEdges) {
       let nextId, nextType;
@@ -311,7 +347,7 @@ export async function getOptimizedContext(queryText, maxTokens, agentId = null, 
 
     // --- 2b. Implicit Name-Based Edges (for robustness when explicit edges are missing) ---
     if (type === 'memory') {
-      const memoryRow = stmts.getMemoryContentById.get(id);
+      const memoryRow = stmts.getMemoryContentById.get(id, WORKSPACE_ID);
       if (memoryRow && memoryRow.content) {
         const contentLower = memoryRow.content.toLowerCase();
         for (const ent of entities) {
@@ -327,7 +363,7 @@ export async function getOptimizedContext(queryText, maxTokens, agentId = null, 
     } else if (type === 'entity') {
       const ent = entities.find(e => e.id === id);
       if (ent && ent.name) {
-        const matchingMemories = stmts.getMemoryLikeContent.all(`%${ent.name}%`);
+        const matchingMemories = stmts.getMemoryLikeContent.all(`%${ent.name}%`, WORKSPACE_ID);
         for (const row of matchingMemories) {
           const nextKey = `memory:${row.id}`;
           if (!visitedNodes.has(nextKey)) {
@@ -512,112 +548,62 @@ function checkRelationship(a, b) {
  * Bug 6 fix: DB mutations are wrapped in a transaction for atomicity.
  */
 export async function consolidateMemories(namespace = null) {
-  const query = namespace
-    ? "SELECT * FROM memories WHERE valid_until IS NULL AND (namespace = ? OR namespace = 'shared')"
-    : 'SELECT * FROM memories WHERE valid_until IS NULL';
-  const activeMemories = namespace
-    ? db.prepare(query).all(namespace)
-    : db.prepare(query).all();
-  const consolidated = [];
-  const visited = new Set();
+  if (namespace === 'all') throw new Error('Cross-workspace consolidation is disabled.');
+  const access = new Set(['shared']);
+  if (process.env.PERSYST_PROJECT) access.add(process.env.PERSYST_PROJECT.toLowerCase());
+  if (namespace) String(namespace).split(',').forEach(value => access.add(value.trim().toLowerCase()));
+  const allowed = Array.from(access).filter(Boolean);
+  const placeholders = allowed.map(() => '?').join(',');
+  const activeMemories = db.prepare(`
+    SELECT * FROM memories
+    WHERE workspace_id = ? AND valid_until IS NULL AND namespace IN (${placeholders})
+  `).all(WORKSPACE_ID, ...allowed);
 
-  // Wrap all mutations in a transaction so a partial failure rolls back.
-  const consolidateOne = db.transaction((mem) => {
-    if (visited.has(mem.id)) return;
+  // Consolidation is review-only. Retrieval heuristics may suggest merges, but
+  // only an explicit update/delete operation is allowed to change durable facts.
+  const proposals = [];
+  const proposalVisited = new Set();
+  for (const memory of activeMemories) {
+    if (proposalVisited.has(memory.id)) continue;
+    const embedding = stmts.getVecByRowId.get(memory.id);
+    if (!embedding) continue;
 
-    // Search for similar memories
-    const embedding = stmts.getVecByRowId.get(mem.id);
-    if (!embedding) return;
-
-    const hits = stmts.consolidateVecSearch.all(embedding.embedding);
-
-    const group = [];
-    for (const hit of hits) {
-      if (visited.has(Number(hit.id))) continue;
-      const sim = Math.max(0, 1 - (hit.distance * hit.distance) / 2);
-      if (sim > 0.80) {
-        const other = stmts.getMemoryByIdRaw.get(Number(hit.id));
-        if (other) {
-          group.push(other);
-        }
-      }
+    const candidates = [];
+    for (const hit of stmts.consolidateVecSearch.all(embedding.embedding)) {
+      const candidateId = Number(hit.id);
+      if (candidateId === memory.id || proposalVisited.has(candidateId)) continue;
+      const similarity = Math.max(0, 1 - (hit.distance * hit.distance) / 2);
+      if (similarity <= 0.80) continue;
+      const candidate = stmts.getMemoryByIdRaw.get(candidateId, WORKSPACE_ID);
+      if (!candidate || !allowed.includes(candidate.namespace)) continue;
+      const relationship = checkRelationship(memory.content, candidate.content);
+      if (relationship.type === 'different') continue;
+      candidates.push({
+        id: candidate.id,
+        content: candidate.content,
+        similarity: Math.round(similarity * 10000) / 10000,
+        relationship
+      });
     }
 
-    if (group.length > 1) {
-      // Sort group by trust score (confidence * reputation) desc, then importance_score desc, then id desc
-      const getTrust = (m) => {
-        const prov = getProvenance(m.id);
-        let reputation = 1.0;
-        if (prov && prov.source_type === 'agent' && prov.source_id) {
-          const agentRow = stmts.getReputationScore.get(prov.source_id);
-          if (agentRow) reputation = agentRow.reputation_score;
-        }
-        return (prov ? prov.confidence : 1.0) * reputation;
-      };
-
-      const groupWithTrust = group.map(m => ({ ...m, trust: getTrust(m) }));
-      groupWithTrust.sort((a, b) => b.trust - a.trust || b.importance_score - a.importance_score || a.id - b.id);
-
-      // Resolve the group sequentially
-      let canonical = groupWithTrust[0];
-      const archivedIds = [];
-      visited.add(canonical.id);
-
-      for (let i = 1; i < groupWithTrust.length; i++) {
-        const current = groupWithTrust[i];
-        const rel = checkRelationship(canonical.content, current.content);
-
-        if (rel.type === 'contradiction') {
-          // Resolve contradiction: keep canonical, archive current.
-          // logContradiction already updates agent stats, so we only record the archive here.
-          stmts.archiveMemoryById.run(current.id);
-          stmts.insertContradiction.run(current.id, canonical.id, `Consolidated contradiction: resolved in favor of canonical #${canonical.id}`);
-
-          archivedIds.push(current.id);
-          visited.add(current.id);
-        } else if (rel.type === 'subset') {
-          if (rel.keep === 'b') {
-            // current (B) is a superset of canonical (A). Swap them
-            stmts.archiveMemoryById.run(canonical.id);
-            stmts.insertContradiction.run(canonical.id, current.id, `Consolidated subset: replaced by more detailed #${current.id}`);
-
-            archivedIds.push(canonical.id);
-            canonical = current;
-          } else {
-            // canonical is superset
-            stmts.archiveMemoryById.run(current.id);
-            stmts.insertContradiction.run(current.id, canonical.id, `Consolidated subset: subsumed by more detailed #${canonical.id}`);
-
-            archivedIds.push(current.id);
-          }
-          visited.add(current.id);
-        } else if (rel.type === 'duplicate') {
-          stmts.archiveMemoryById.run(current.id);
-          stmts.insertContradiction.run(current.id, canonical.id, `Consolidated duplicate of #${canonical.id}`);
-
-          archivedIds.push(current.id);
-          visited.add(current.id);
-        }
-      }
-
-      if (archivedIds.length > 0) {
-        consolidated.push({
-          canonical_id: canonical.id,
-          merged_content: canonical.content,
-          archived_ids: archivedIds
-        });
-      }
+    if (candidates.length > 0) {
+      proposalVisited.add(memory.id);
+      candidates.forEach(candidate => proposalVisited.add(candidate.id));
+      proposals.push({
+        canonical_candidate: { id: memory.id, content: memory.content },
+        related_candidates: candidates,
+        status: 'review_required'
+      });
     }
-  });
-
-  for (const mem of activeMemories) {
-    consolidateOne(mem);
   }
 
   return {
     success: true,
-    consolidated_groups: consolidated.length,
-    details: consolidated
+    mode: 'review_only',
+    consolidated_groups: 0,
+    proposed_groups: proposals.length,
+    proposals,
+    details: []
   };
 }
 

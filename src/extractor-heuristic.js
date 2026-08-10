@@ -258,6 +258,76 @@ function cleanFact(raw) {
     .slice(0, 200);                // hard max fact length
 }
 
+/**
+ * Validate structural and semantic integrity of an extracted candidate fact.
+ * Rejects IDE responses, test assertions, code syntax fragments, and dangling phrases.
+ * 
+ * @param {string} fact - Cleaned candidate fact text
+ * @returns {boolean} - true if valid, false if corrupted/noise
+ */
+export function validateExtractedFact(fact) {
+  if (!fact || typeof fact !== 'string') return false;
+  const clean = fact.trim();
+  if (clean.length < 8 || clean.length > 220) return false;
+
+  const lower = clean.toLowerCase();
+
+  // 1. Must contain at least 3 distinct words
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+
+  // 2. Reject IDE response headers, tool output artifacts, and meta-discussion about extraction rules
+  const ideNoisePatterns = [
+    'the above snippet only shows',
+    'any changes targeting the original code',
+    'please note that any changes',
+    'remove the line number',
+    'format: <line_number>',
+    'you have just created an artifact',
+    'module type of file:',
+    'should contain memory',
+    'note: module type',
+    'note: user is testing',
+    'reminder: you to save',
+    'note: the above',
+    'note: any changes',
+    'we save it, period',
+    'always get stored',
+    'this filter is only applied',
+    'regex matcher captures',
+    'implicit pattern matches'
+  ];
+  if (ideNoisePatterns.some(p => lower.includes(p))) return false;
+
+  // 3. Reject test assertions, code execution fragments, and code comment syntax
+  const testPatterns = [
+    'assert.ok',
+    'assert.equal',
+    'assert.strictequal',
+    't.test',
+    'describe(',
+    'it(',
+    'process.env',
+    'require(',
+    'import {',
+    'export function'
+  ];
+  if (testPatterns.some(p => lower.includes(p))) return false;
+
+  // 4. Reject code syntax corruption (unclosed quotes, escaped quotes, backticks in prefixes, string concatenations)
+  if (/^Note:\s*[,`"']/.test(clean)) return false;
+  if (/Note:\s*this["`']/i.test(clean)) return false;
+  if (/['"]\)\s*,?\s*['"]/.test(clean)) return false;
+  if (/['"]\s*\+\s*['"]/.test(clean)) return false;
+  if (/\\"[*,]/.test(clean)) return false;
+  if (/^(?:const|let|var|function|import|export)\s/i.test(clean)) return false;
+
+  // 5. Reject dangling prepositions at the end of the statement
+  if (/\b(?:with|for|in|to|at|of|by|on|and|or|the|a|an)\s*$/i.test(clean)) return false;
+
+  return true;
+}
+
 // List of programming/tech concepts to distinguish tech context from conversational filler
 const TECH_CONCEPTS = [
   'mode', 'theme', 'config', 'stack', 'style', 'code', 'file', 'folder', 'path',
@@ -366,6 +436,26 @@ function extractExplicitSaves(text) {
       const metaWords = ['search_memories', 'add_memory', 'get_optimized_context', 'persyst tool'];
       if (metaWords.some(w => cleaned.toLowerCase().includes(w))) continue;
 
+      // Skip IDE system headers, test code assertions, and code fragments
+      const noiseIgnores = [
+        'the above snippet only shows',
+        'any changes targeting the original code',
+        'you have just created an artifact',
+        'module type of file:',
+        'should contain memory',
+        'assert.ok',
+        'assert.equal',
+        'assert.strictequal',
+        't.test',
+        'describe(',
+        'it('
+      ];
+      const lowerCleaned = cleaned.toLowerCase();
+      if (noiseIgnores.some(w => lowerCleaned.includes(w))) continue;
+
+      // Skip code syntax corruption (unclosed quotes, brackets, test assertion fragments)
+      if (/['"]\)\s*,?\s*['"]/.test(cleaned) || /['"]\s*\+\s*['"]/.test(cleaned) || /\\"[*,]/.test(cleaned)) continue;
+
       const key = cleaned.toLowerCase().replace(/\s+/g, ' ').trim();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -376,6 +466,8 @@ function extractExplicitSaves(text) {
         const prefix = pattern.category === 'reminder' ? 'Reminder' : 'Note';
         content = `${prefix}: ${cleaned}`;
       }
+
+      if (!validateExtractedFact(content)) continue;
 
       results.push({
         content,
