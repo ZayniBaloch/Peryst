@@ -190,3 +190,4 @@ npx persyst-mcp import my-backup.jsonl
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+fixed
