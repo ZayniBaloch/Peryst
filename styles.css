@@ -142,7 +142,7 @@ section[id]{scroll-margin-top:88px}
 .faq-list details p a{color:var(--blue);font-weight:800}
 
 /* CTA + footer */
-.cta{margin:0 auto 67px;min-height:114px;border-radius:17px;display:flex;align-items:center;justify-content:space-between;padding:22px 37px;color:#fff;overflow:hidden;position:relative;background:linear-gradient(100deg,rgba(29,25,20,.96),rgba(61,40,27,.75)),radial-gradient(circle at 80% 30%,rgba(229,154,84,.5),transparent 50%),#14100c;box-shadow:0 14px 30px rgba(50,38,28,.15)}
+.cta{margin:0 auto 67px;min-height:230px;border-radius:17px;display:flex;align-items:center;justify-content:space-between;padding:30px 40px;color:#fff;overflow:hidden;position:relative;background:linear-gradient(90deg,rgba(12,15,20,.95) 0%,rgba(12,15,20,.84) 34%,rgba(17,27,46,.4) 62%,rgba(17,27,46,.14) 100%),url('cta-keeper.png');background-size:auto,cover;background-position:left center,74% 26%;box-shadow:0 14px 30px rgba(50,38,28,.2)}
 .cta h2{font-size:20px;margin:0 0 5px;letter-spacing:-.04em}
 .cta p{font-size:10px;color:#cac6bf;margin:0}
 footer{border-top:1px solid var(--line);padding:30px 0 18px}
@@ -175,7 +175,7 @@ footer{border-top:1px solid var(--line);padding:30px 0 18px}
   .hero-buttons{gap:8px;flex-wrap:wrap}
   .spec-grid,.scene-grid{grid-template-columns:1fr}
   .spec{min-height:0}.scene{min-height:180px}
-  .cta{padding:25px 20px;display:block}.cta .button{margin-top:18px}
+  .cta{padding:25px 20px;display:block;min-height:300px;background-position:left top,76% 18%}.cta .button{margin-top:18px}
   .copyright{display:block;line-height:2}.copyright span{display:block}
 }
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
