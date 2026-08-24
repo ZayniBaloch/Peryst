@@ -13,9 +13,10 @@ a{color:inherit;text-decoration:none}button,input,textarea{font:inherit}button{b
 header{height:72px;background:rgba(255,255,255,.88);border-bottom:1px solid rgba(220,214,206,.45);display:flex;align-items:center;position:relative;z-index:20}
 .nav{display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:800;letter-spacing:-.05em}
-.brand-mark{width:22px;height:22px;display:inline-block;border:3px solid var(--ink);border-radius:6px;position:relative}
-.brand-mark:after{content:"";position:absolute;left:50%;top:3px;width:6px;height:6px;margin-left:-4px;border:2px solid var(--ink);border-radius:50%;box-sizing:border-box}
-.brand-mark:before{content:"";position:absolute;left:50%;top:11px;width:2px;height:6px;margin-left:-1px;background:var(--ink)}
+.brand-mark{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center}
+.brand-mark svg{display:block}
+.brand-mark .orb{animation:orbPulse 3.2s ease-in-out infinite}
+@keyframes orbPulse{0%,100%{opacity:1}50%{opacity:.72}}
 .nav-links{display:flex;gap:29px;align-items:center;margin-left:80px;font-size:11px;font-weight:700}
 .nav-links a{transition:color .2s}.nav-links a:hover{color:var(--blue)}
 .nav-actions{display:flex;gap:17px;align-items:center;font-size:11px;font-weight:700}
