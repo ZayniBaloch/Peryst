@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScopeKeep - Governed Memory for AI Coding Agents</title>
+  <meta name="description" content="ScopeKeep is a local-first, project-scoped memory layer for Claude Code, Cursor, VS Code and every MCP client. Encrypted at rest, workspace-isolated, with signed retrieval evidence.">
+  <meta name="theme-color" content="#f7f2ea">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' rx='7' fill='none' stroke='%23111b2e' stroke-width='3'/%3E%3Ccircle cx='16' cy='14' r='4' fill='none' stroke='%23111b2e' stroke-width='3'/%3E%3Cpath d='M16 18v5' stroke='%23111b2e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"ScopeKeep","url":"https://github.com/ZayniBaloch/persyst","applicationCategory":"DeveloperApplication","operatingSystem":"Cross-platform","description":"Governed, project-scoped memory and context for AI coding agents.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+  </script>
+</head>
+<body>
+
+  <header><nav class="container nav" aria-label="Primary navigation">
+    <a class="brand" href="/" aria-label="ScopeKeep home"><span class="brand-mark" aria-hidden="true"></span>SCOPEKEEP</a>
+    <div class="nav-links">
+      <a href="#specs">Specs</a>
+      <a href="#reference">Reference</a>
+      <a href="#use-cases">Use cases</a>
+      <a href="#governance">Governance</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="nav-actions">
+      <a class="button dark" href="https://github.com/ZayniBaloch/persyst" target="_blank" rel="noopener">GitHub</a>
+      <a class="button blue" href="#quickstart">Get Started <span class="arrow">&rarr;</span></a>
+    </div>
+  </nav></header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-art" role="img" aria-label="Cinematic historic archive hall with a glowing drawer — memory preserved across centuries"></div>
+      <i class="point one" style="top:18px;right:42%" aria-hidden="true"></i>
+      <i class="point two" style="top:160px;right:26%" aria-hidden="true"></i>
+      <i class="point three" style="top:280px;right:48%" aria-hidden="true"></i>
+      <div class="container"><div class="hero-copy">
+        <div class="mono eyebrow">LOCAL-FIRST MEMORY OVER MCP</div>
+        <h1>Memory that survives<span>the session.</span>And the audit.</h1>
+        <p class="hero-slogan">Project-scoped memory for AI coding agents &mdash; stored locally, retrieved by meaning, proven by signature.</p>
+        <p class="hero-desc">ScopeKeep gives Claude Code, Cursor, VS Code and any MCP client a shared, encrypted memory per workspace. Hybrid search surfaces the right fact. An Ed25519-signed ledger records exactly what context was returned.</p>
+        <div class="hero-buttons">
+          <a class="button blue" href="#quickstart">Start in one command <span class="arrow">&rarr;</span></a>
+          <a class="button light" href="#governance">How governance works</a>
+        </div>
+        <div class="hero-trust"><span><b>100%</b> local execution</span><span><b>Ed25519</b> signed evidence</span><span><b>Encrypted</b> at rest</span><span><b>MIT</b> core</span><span><b>Public</b> alpha</span></div>
+      </div></div>
+    </section>
+
+    <section class="try-section"><div class="container"><div class="try-card">
+      <div class="try-intro">
+        <div class="mono">SEE IT WORK</div>
+        <h2>Your agent stops re-learning your codebase.</h2>
+        <p>Durable facts go in once. Every session starts with what was already decided &mdash; conventions, gotchas, architecture calls, failed approaches.</p>
+        <div class="try-note"><strong>&rsaquo;_</strong><span>This is an illustrative demo of real CLI output. Run the commands yourself after installing &mdash; everything below executes on your machine only.</span></div>
+      </div>
+      <div class="playground">
+        <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="presets" role="group" aria-label="Demo commands">
+          <button class="preset" data-cmd="init">scopekeep init --mcp=vscode</button>
+          <button class="preset" data-cmd="save">add_memory</button>
+          <button class="preset" data-cmd="search">search_memories</button>
+          <button class="preset" data-cmd="verify">verify_attestation</button>
+        </div>
+        <div class="result" id="term-out" aria-live="polite"></div>
+      </div>
+    </div></div></section>
+
+    <section class="specs" id="specs" aria-labelledby="spec-title">
+      <div class="container">
+        <div class="mono section-kicker">PRODUCT SPECIFICATIONS</div>
+        <h2 class="section-title" id="spec-title">Built for durable, provable context.</h2>
+        <p class="section-copy">Numbers describe the shipped engine on its own hardware. Retrieval quality depends on your facts, not our marketing &mdash; run the included benchmark suite yourself.</p>
+        <div class="spec-grid">
+          <article class="spec"><div class="spec-number">100%</div><div class="spec-label">Local-first</div><div class="spec-detail">SQLite + on-device embeddings. No cloud sync, no telemetry, no accounts. One-time embedding-model download; deterministic offline fallback.</div></article>
+          <article class="spec"><div class="spec-number">Recall@5&nbsp;1.0</div><div class="spec-label">Bundled retrieval benchmark</div><div class="spec-detail">500-fact needle-in-haystack suite ships in the repo &mdash; run it yourself. MRR &ge; 0.80 asserted in CI.</div></article>
+          <article class="spec"><div class="spec-number">Ed25519</div><div class="spec-label">Signed retrieval evidence</div><div class="spec-detail">SHA-256 chained attestations record what was returned, when, to which agent.</div></article>
+          <article class="spec"><div class="spec-number">$0</div><div class="spec-label">Core license &amp; price</div><span class="free-badge">Freemium &mdash; free core</span><div class="spec-detail">MIT-licensed core today. Team &amp; sync tiers planned; specifics announced later.</div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="parameter-section" id="reference" aria-labelledby="ref-title">
+      <div class="container">
+        <div class="mono section-kicker">AT-A-GLANCE REFERENCE</div>
+        <h2 class="section-title" id="ref-title">The stack behind the memory.</h2>
+        <p class="section-copy">Everything below runs inside the single npm package. No external services, no vector cloud, no sidecar database to babysit.</p>
+        <div class="table-wrap"><table class="model-table">
+          <caption>ScopeKeep technical reference</caption>
+          <thead><tr><th scope="col">Component</th><th scope="col">Details</th></tr></thead>
+          <tbody>
+            <tr><td>Storage</td><td>One encrypted SQLite database per workspace under <code>~/.scopekeep/workspaces/</code>. AES encryption via SQLCipher multiple-ciphers; plaintext databases are rekeyed automatically on first open.</td></tr>
+            <tr><td>Temporal model</td><td>Bi-temporal records with validity and assertion windows. Point-in-time review via <code>get_memories_as_of</code>; updates are versioned, never overwritten silently.</td></tr>
+            <tr><td>Retrieval</td><td>Hybrid FTS5 (BM25) + sqlite-vec KNN over 384-dim MiniLM embeddings, merged with keyword boost, reputation weighting and MMR diversification. Falls back to deterministic hash embeddings offline.</td></tr>
+            <tr><td>Evidence</td><td>Optional signed attestation per retrieval: Ed25519 signature appended to a SHA-256 hash chain, query text hashed by default. Verifiable with <code>verify_attestation</code>.</td></tr>
+            <tr><td>Safety</td><td>Credential redaction applied when memories are stored; contradiction handling proposes reviews instead of mutating history; workspace purge verifies zero remaining rows, checkpoints the WAL and vacuums.</td></tr>
+            <tr><td>Maturity</td><td><strong>Public alpha.</strong> Direct MCP retrieval is the reliable path. Passive editor transcript capture is opt-in and not launch-grade on Windows. Known limitations are documented in the README &mdash; nothing here hides them.</td></tr>
+            <tr><td>Transport</td><td>MCP over stdio for VS Code, Cursor, Claude Code, Windsurf and friends. Optional loopback HTTP gateway, authenticated, disabled by default in production.</td></tr>
+            <tr><td>Clients</td><td>Any MCP-compatible client. Generated configs for VS Code, Cursor and Claude Code via <code>scopekeep init --mcp=&lt;client&gt;</code>.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    <section class="api-section" id="quickstart" aria-labelledby="qs-title">
+      <div class="container"><div class="api-layout">
+        <div class="api-copy">
+          <div class="mono">QUICK START</div>
+          <h2 id="qs-title">One command. Any MCP client.</h2>
+          <p>Install, generate your editor's MCP config, and start saving facts. Works from source checkouts too &mdash; clone, <code>npm install</code>, <code>node index.js</code>.</p>
+          <div class="link-row" style="display:flex;gap:15px;margin-top:21px;flex-wrap:wrap">
+            <a class="text-link" style="color:var(--blue);font-size:11px;font-weight:800" href="https://github.com/ZayniBaloch/persyst#readme" target="_blank" rel="noopener">Full documentation &rarr;</a>
+          </div>
+        </div>
+        <div class="code-panel">
+          <div class="code-head"><span>TERMINAL</span><button class="copy-button" id="copy-install">Copy</button></div>
+          <code id="install-snippet"><span class="c-dim"># Install and wire up your editor (VS Code shown)</span>
+npx scopekeep@latest init --mcp=vscode
+
+<span class="c-dim"># Check health, then talk to it from your agent</span>
+npx scopekeep@latest doctor
+npx scopekeep@latest status
+
+<span class="c-dim"># Optional: export or purge everything, verifiably</span>
+node index.js privacy-export workspace-data.json
+node index.js purge-workspace --confirm=&lt;workspace-id&gt;</code>
+        </div>
+        <p style="max-width:640px;margin:14px 2px 0;color:#817e77;font-size:11px;line-height:1.6;text-align:left">Requires Node.js 20.19+ and Git. ScopeKeep is <strong style="color:var(--ink)">public alpha</strong>: direct MCP retrieval is the reliable path; passive transcript capture is opt-in and not launch-grade on Windows. Known limitations are listed in the README.</p>
+      </div></div>
+    </section>
+
+    <section class="scenes" id="use-cases" aria-labelledby="scene-title">
+      <div class="container">
+        <div class="scene-heading">
+          <div><div class="mono">DESIGNED FOR THE WORK AHEAD</div><h2 id="scene-title">One store. Three ways it pays off.</h2></div>
+          <p>From solo side projects to regulated teams, the value compounds the longer your agents share one memory.</p>
+        </div>
+        <div class="scene-grid">
+          <article class="scene"><span class="scene-icon" aria-hidden="true">&#8984;</span><span class="mono">01 / SOLO DEVS</span><h3>Stop re-explaining.</h3><p>Your preferences, project conventions and past failures follow every new session of Claude Code, Cursor or Aider.</p></article>
+          <article class="scene"><span class="scene-icon" aria-hidden="true">&#9671;</span><span class="mono">02 / TEAMS</span><h3>Onboard agents like people.</h3><p>Decisions made last sprint are retrievable this sprint. Workspace hashing keeps repos isolated; namespaces keep agents honest.</p></article>
+          <article class="scene"><span class="scene-icon" aria-hidden="true">&Phi;</span><span class="mono">03 / REGULATED TEAMS</span><h3>Prove what the AI knew.</h3><p>Signed evidence, verified purge and audit exports give compliance teams something concrete instead of vibes.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="use-case-detail" id="governance" aria-labelledby="gov-title">
+      <div class="container">
+        <div class="mono">GOVERNED MEMORY, NOT SILENT MUTATION</div>
+        <h2 id="gov-title">Conflicts become proposals. History stays honest.</h2>
+        <p>When a new fact contradicts a stored one, most memory tools quietly overwrite. ScopeKeep versions both sides, links them in a contradiction chain, and returns a <strong>review proposal</strong> &mdash; you decide which version is true. Consolidation candidates are proposed the same way, never auto-merged into Frankenstein summaries.</p>
+        <p>Every retrieval can be recorded as an attestation: who asked, what query, which memories came back, signed with Ed25519 and chained so nothing can be removed retroactively. Combined with point-in-time reconstruction (<code>get_memories_as_of</code>), you can answer the question auditors actually ask: <strong>what did the agent know at the moment it acted?</strong></p>
+        <p><strong>Purge is verifiable, not promised.</strong> Deleting a workspace requires typing its exact ID, deletes all owned rows, verifies none remain, checkpoints the WAL and vacuums the file. The privacy export produces a complete, human-readable record of everything the workspace owns first.</p>
+      </div>
+    </section>
+
+
+    <section class="faq-section" id="faq" aria-labelledby="faq-title">
+      <div class="container"><div class="faq-layout">
+        <div class="faq-intro">
+          <div class="mono">QUESTIONS, ANSWERED</div>
+          <h2 id="faq-title">Questions about storage, evidence, and control.</h2>
+          <p>Straight answers, including the limits. The README documents known alpha issues in the same spirit.</p>
+        </div>
+        <div class="faq-list">
+          <details open><summary>What is ScopeKeep?</summary><p>A local-first memory layer for AI coding tools. Durable project facts live in an encrypted SQLite database per workspace and are exposed to any MCP client &mdash; Claude Code, Cursor, VS Code, Windsurf and others.</p></details>
+          <details><summary>Is it free? What does freemium mean here?</summary><p>The core is free and MIT-licensed &mdash; the full local engine, no account, no telemetry. ScopeKeep is freemium: optional paid tiers (team features, sync, managed policy controls) are planned for later; specifics and pricing will be announced when they exist. The local core stays free.</p></details>
+          <details><summary>How mature is it?</summary><p>Public alpha. The retrieval engine, storage, encryption, evidence chain and CLI are tested by a 30-file suite that runs in CI. Passive editor transcript capture is opt-in and not launch-grade on Windows &mdash; use direct MCP calls. The README's "Known alpha limitations" section is the honest list.</p></details>
+          <details><summary>How is this different from CLAUDE.md or Cursor Memories?</summary><p>Rule files are static text you maintain by hand; editor memories stay inside one editor. ScopeKeep is a store your agents read and write across tools &mdash; with hybrid semantic search, versioning, conflict proposals and signed evidence. Most teams use rule files for stable conventions and ScopeKeep for accumulated knowledge.</p></details>
+          <details><summary>Where does my data live, exactly?</summary><p>In one encrypted database per workspace under <code>~/.scopekeep/workspaces/&lt;id&gt;/scopekeep.db</code>, keyed by a canonical repository-root hash. Keys stay on your machine; nothing syncs anywhere unless you export it yourself.</p></details>
+          <details><summary>What do the signed attestations actually prove?</summary><p>That a specific retrieval happened: the query (hashed by default), the memories returned, the agent identity and timestamp &mdash; signed with Ed25519 and chained so entries cannot be dropped later. It is audit evidence, not a certification of anything.</p></details>
+          <details><summary>Does ScopeKeep make me GDPR or HIPAA compliant?</summary><p>No blanket claim is made, on purpose. It provides technical controls &mdash; verified purge, exports, audit chains &mdash; that can support your own compliance program. Legal classification depends on your deployment. See the privacy manifest in the repo.</p></details>
+        </div>
+      </div></div>
+    </section>
+
+    <div class="container cta">
+      <div><h2>Ready to give your agents a memory?</h2><p>One command wires up your editor. Everything stays on your machine.</p></div>
+      <a class="button blue" href="#quickstart">Start now <span class="arrow">&rarr;</span></a>
+    </div>
+  </main>
+
+  <footer><div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>SCOPEKEEP</a>
+        <p>Governed, project-scoped memory for AI coding agents. Local-first by architecture, not by policy. Public alpha &mdash; freemium: free MIT core, paid tiers planned.</p>
+        <div class="socials"><a href="https://github.com/ZayniBaloch/persyst" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="footer-col"><h4>Product</h4><a href="#specs">Specifications</a><a href="#reference">Tech reference</a><a href="#use-cases">Use cases</a></div>
+      <div class="footer-col"><h4>Governance</h4><a href="#governance">Audit evidence</a><a href="#faq">FAQ</a></div>
+      <div class="footer-col"><h4>Developers</h4><a href="https://github.com/ZayniBaloch/persyst#readme" target="_blank" rel="noopener">Documentation</a><a href="https://github.com/ZayniBaloch/persyst/issues" target="_blank" rel="noopener">Issues</a></div>
+      <div class="footer-col"><h4>Legal</h4><a href="https://github.com/ZayniBaloch/persyst/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a></div>
+    </div>
+    <div class="copyright"><span>&copy; 2026 ScopeKeep contributors.</span><span>Public alpha &middot; Local-first memory &middot; Provable context</span></div>
+  </div></footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
